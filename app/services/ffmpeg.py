@@ -1,9 +1,46 @@
 import subprocess
 import json
+import shutil
 from pathlib import Path
 from typing import Optional
 
 from app.config import settings
+
+
+def append_outro(input_path: str, output_path: str) -> str:
+    """
+    Append the outro clip to the end of a video.
+    The outro should be at assets/outro.mp4
+    """
+    outro_path = settings.assets_path / "outro.mp4"
+    if not outro_path.exists():
+        # No outro configured, just copy the file
+        shutil.copy(input_path, output_path)
+        return output_path
+
+    # Create concat file
+    concat_file = Path(output_path).parent / "concat_outro.txt"
+    with open(concat_file, "w") as f:
+        f.write(f"file '{input_path}'\n")
+        f.write(f"file '{outro_path}'\n")
+
+    cmd = [
+        "ffmpeg",
+        "-f", "concat",
+        "-safe", "0",
+        "-i", str(concat_file),
+        "-c", "copy",
+        "-y",
+        output_path
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    concat_file.unlink(missing_ok=True)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Outro append failed: {result.stderr}")
+
+    return output_path
 
 
 def get_video_info(video_path: str) -> dict:
@@ -71,6 +108,46 @@ def extract_frame(video_path: str, output_path: str, timestamp: float = 0) -> st
         raise RuntimeError(f"Frame extraction failed: {result.stderr}")
 
     return output_path
+
+
+def extract_thumbnail_candidates(video_path: str, output_dir: str, count: int = 10) -> list:
+    """
+    Extract multiple frames from video as thumbnail candidates.
+    Spreads them evenly across the video duration.
+    Returns list of paths to extracted frames.
+    """
+    video_info = get_video_info(video_path)
+    duration = video_info["duration"]
+
+    # Don't include the very start or end (often black/transitions)
+    start_offset = duration * 0.05  # Skip first 5%
+    end_offset = duration * 0.95    # Skip last 5%
+    usable_duration = end_offset - start_offset
+
+    paths = []
+    for i in range(count):
+        timestamp = start_offset + (usable_duration * i / (count - 1)) if count > 1 else duration / 2
+        output_path = f"{output_dir}/thumb_candidate_{i+1:02d}.jpg"
+
+        cmd = [
+            "ffmpeg",
+            "-ss", str(timestamp),
+            "-i", video_path,
+            "-vframes", "1",
+            "-q:v", "2",
+            "-y",
+            output_path
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            paths.append({
+                "path": output_path,
+                "timestamp": timestamp,
+                "index": i + 1
+            })
+
+    return paths
 
 
 def render_video_with_captions(

@@ -36,27 +36,80 @@
     </video>
 </div>
 
-<!-- Thumbnails -->
+<!-- Thumbnail Picker -->
+{% if job.thumbnail_candidates %}
 <div class="card">
-    <h3 class="mb-2">Thumbnails</h3>
+    <h3 class="mb-2">Choose Thumbnail</h3>
+    <p class="text-muted text-small mb-2">Click to select a frame, then click "Apply" to regenerate thumbnails with text</p>
+    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; margin-bottom: 1rem;">
+        {% for candidate in job.thumbnail_candidates %}
+        <div class="thumb-candidate {% if (job.selected_thumbnail_index or '1') == candidate.index|string %}selected{% endif %}"
+             onclick="selectThumbnail({{ candidate.index }})"
+             data-index="{{ candidate.index }}"
+             style="cursor: pointer; border: 3px solid {% if (job.selected_thumbnail_index or '1') == candidate.index|string %}var(--primary){% else %}transparent{% endif %}; border-radius: 4px; overflow: hidden;">
+            <img src="/api/jobs/{{ job.id }}/thumbnail/candidate/{{ candidate.index }}"
+                 alt="Option {{ candidate.index }}"
+                 style="width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #000;">
+            <p class="text-muted text-small" style="text-align: center; padding: 2px 0;">#{{ candidate.index }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    <button class="btn" onclick="applyThumbnail()" id="apply-thumb-btn">Apply Selected Thumbnail</button>
+</div>
+{% endif %}
+
+<!-- Final Thumbnails -->
+<div class="card">
+    <h3 class="mb-2">Final Thumbnails</h3>
     <div class="grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
         <div>
-            <img src="/api/jobs/{{ job.id }}/thumbnail/fi" alt="Finnish Thumbnail"
+            <img src="/api/jobs/{{ job.id }}/thumbnail/fi?t={{ job.updated_at.timestamp() if job.updated_at else '' }}" alt="Finnish Thumbnail"
                  style="width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #000; border-radius: 4px;">
             <p class="text-muted text-small mt-2">Suomi</p>
         </div>
         <div>
-            <img src="/api/jobs/{{ job.id }}/thumbnail/en" alt="English Thumbnail"
+            <img src="/api/jobs/{{ job.id }}/thumbnail/en?t={{ job.updated_at.timestamp() if job.updated_at else '' }}" alt="English Thumbnail"
                  style="width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #000; border-radius: 4px;">
             <p class="text-muted text-small mt-2">English</p>
         </div>
         <div>
-            <img src="/api/jobs/{{ job.id }}/thumbnail/clean" alt="Clean Thumbnail"
+            <img src="/api/jobs/{{ job.id }}/thumbnail/clean?t={{ job.updated_at.timestamp() if job.updated_at else '' }}" alt="Clean Thumbnail"
                  style="width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #000; border-radius: 4px;">
             <p class="text-muted text-small mt-2">Clean (no text)</p>
         </div>
     </div>
 </div>
+
+<script>
+let selectedThumbIndex = {{ job.selected_thumbnail_index or 1 }};
+
+function selectThumbnail(index) {
+    selectedThumbIndex = index;
+    document.querySelectorAll('.thumb-candidate').forEach(el => {
+        el.style.borderColor = el.dataset.index == index ? 'var(--primary)' : 'transparent';
+    });
+}
+
+async function applyThumbnail() {
+    const btn = document.getElementById('apply-thumb-btn');
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+
+    const resp = await fetch('/api/jobs/{{ job.id }}/thumbnail/select', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({index: selectedThumbIndex})
+    });
+
+    if (resp.ok) {
+        location.reload();
+    } else {
+        alert('Failed to apply thumbnail');
+        btn.disabled = false;
+        btn.textContent = 'Apply Selected Thumbnail';
+    }
+}
+</script>
 
 <!-- Generated Content - Finnish -->
 <div class="card">

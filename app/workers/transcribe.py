@@ -114,23 +114,34 @@ def process_job(job_id: str):
                 f.write(transcription["ass"])
 
         # Render final video with captions
-        output_path = str(storage.get_export_path(job_id, "video.mp4"))
+        temp_rendered_path = str(storage.get_processing_path(job_id, "rendered.mp4"))
         ffmpeg.render_video_with_captions(
             cut_video_path,
-            output_path,
+            temp_rendered_path,
             srt_path=srt_path,
             ass_path=ass_path,
             burn_captions=(job.burn_captions == "true"),
         )
+
+        # Append outro
+        update_job_status(db, job, "rendering", "Adding outro...")
+        output_path = str(storage.get_export_path(job_id, "video.mp4"))
+        ffmpeg.append_outro(temp_rendered_path, output_path)
         job.output_video_path = output_path
 
         # Step 5: Generate thumbnails with text
-        update_job_status(db, job, "rendering", "Generating thumbnails...")
+        update_job_status(db, job, "rendering", "Generating thumbnail candidates...")
 
-        # Extract base frame at 1/3 of the video
-        base_thumb_path = str(storage.get_processing_path(job_id, "thumb_base.jpg"))
-        thumb_timestamp = video_info["duration"] / 3
-        ffmpeg.extract_frame(input_video, base_thumb_path, thumb_timestamp)
+        # Extract multiple thumbnail candidates for user to choose from
+        thumb_dir = str(storage.get_export_path(job_id, ""))
+        candidates = ffmpeg.extract_thumbnail_candidates(output_path, thumb_dir, count=10)
+        job.thumbnail_candidates = candidates
+
+        # Use first candidate as default base
+        base_thumb_path = candidates[0]["path"] if candidates else str(storage.get_processing_path(job_id, "thumb_base.jpg"))
+        if not candidates:
+            thumb_timestamp = video_info["duration"] / 3
+            ffmpeg.extract_frame(input_video, base_thumb_path, thumb_timestamp)
 
         # Generate thumbnail text in both languages
         thumb_text = claude.generate_thumbnail_text(

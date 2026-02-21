@@ -46,12 +46,18 @@ def process_precaptioned_job(job_id: str):
         trim_seconds = float(job.remove_outro_seconds or "3")
         output_path = str(storage.get_export_path(job_id, "video.mp4"))
 
+        # First remove CapCut watermark to temp file
+        temp_video_path = str(storage.get_processing_path(job_id, "cleaned.mp4"))
         ffmpeg.remove_capcut_watermark(
             input_video,
-            output_path,
+            temp_video_path,
             trim_end_seconds=trim_seconds,
             cover_corner=True,  # Cover the corner watermark
         )
+
+        # Then append outro
+        update_job_status(db, job, "rendering", "Adding outro...")
+        ffmpeg.append_outro(temp_video_path, output_path)
         job.output_video_path = output_path
 
         # Step 2: Extract audio for transcription
@@ -89,12 +95,18 @@ def process_precaptioned_job(job_id: str):
         db.commit()
 
         # Step 5: Generate thumbnails
-        update_job_status(db, job, "rendering", "Generating thumbnails...")
+        update_job_status(db, job, "rendering", "Generating thumbnail candidates...")
 
-        # Extract base frame at 1/3 of the video
-        base_thumb_path = str(storage.get_processing_path(job_id, "thumb_base.jpg"))
-        thumb_timestamp = video_info["duration"] / 3
-        ffmpeg.extract_frame(output_path, base_thumb_path, thumb_timestamp)
+        # Extract multiple thumbnail candidates for user to choose from
+        thumb_dir = str(storage.get_export_path(job_id, ""))
+        candidates = ffmpeg.extract_thumbnail_candidates(output_path, thumb_dir, count=10)
+        job.thumbnail_candidates = candidates
+
+        # Use first candidate as default base
+        base_thumb_path = candidates[0]["path"] if candidates else str(storage.get_processing_path(job_id, "thumb_base.jpg"))
+        if not candidates:
+            thumb_timestamp = video_info["duration"] / 3
+            ffmpeg.extract_frame(output_path, base_thumb_path, thumb_timestamp)
 
         # Generate thumbnail text
         thumb_text = claude.generate_thumbnail_text(

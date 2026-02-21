@@ -43,6 +43,8 @@ class Job(Base):
     thumbnail_path = Column(String(500))
     thumbnail_path_fi = Column(String(500))
     thumbnail_path_en = Column(String(500))
+    thumbnail_candidates = Column(JSON)  # List of {path, timestamp, index} for user to choose from
+    selected_thumbnail_index = Column(String(10))  # Which candidate the user picked
 
     # Auto-posting
     youtube_autopost = Column(String(10), default="false")  # "true" or "false"

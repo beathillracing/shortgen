@@ -113,6 +113,72 @@ def get_video(job_id: str, db: Session = Depends(get_db)):
     return FileResponse(job.output_video_path, media_type="video/mp4")
 
 
+@router.get("/jobs/{job_id}/thumbnail/candidate/{index}")
+def get_thumbnail_candidate(job_id: str, index: int, db: Session = Depends(get_db)):
+    """Get a thumbnail candidate by index."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    if not job.thumbnail_candidates:
+        raise HTTPException(404, "No thumbnail candidates available")
+
+    # Find the candidate with matching index
+    candidate = next((c for c in job.thumbnail_candidates if c["index"] == index), None)
+    if not candidate or not Path(candidate["path"]).exists():
+        raise HTTPException(404, "Thumbnail candidate not found")
+
+    return FileResponse(candidate["path"], media_type="image/jpeg")
+
+
+@router.post("/jobs/{job_id}/thumbnail/select")
+def select_thumbnail(job_id: str, data: dict, db: Session = Depends(get_db)):
+    """Select a thumbnail candidate and regenerate final thumbnails with text."""
+    from app.services import thumbnail, claude
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    index = data.get("index", 1)
+    if not job.thumbnail_candidates:
+        raise HTTPException(400, "No thumbnail candidates available")
+
+    # Find the selected candidate
+    candidate = next((c for c in job.thumbnail_candidates if c["index"] == index), None)
+    if not candidate:
+        raise HTTPException(400, "Invalid thumbnail index")
+
+    # Update selected index
+    job.selected_thumbnail_index = str(index)
+
+    # Regenerate thumbnails with text overlays using the selected candidate
+    export_dir = settings.storage_path / "exports" / job_id
+
+    # Generate thumbnail text
+    thumb_text = claude.generate_thumbnail_text(
+        job.suggested_title_fi or "",
+        job.suggested_title_en or "",
+        job.context_description
+    )
+
+    # Create new thumbnails from selected candidate
+    thumb_paths = thumbnail.create_thumbnail_variants(
+        candidate["path"],
+        export_dir,
+        thumb_text.get("text_fi", "KATSO"),
+        thumb_text.get("text_en", "WATCH")
+    )
+
+    job.thumbnail_path = thumb_paths["clean"]
+    job.thumbnail_path_fi = thumb_paths["fi"]
+    job.thumbnail_path_en = thumb_paths["en"]
+
+    db.commit()
+
+    return {"status": "ok", "selected": index}
+
+
 @router.get("/jobs/{job_id}/thumbnail/{variant}")
 def get_thumbnail(job_id: str, variant: str = "clean", db: Session = Depends(get_db)):
     """Get the thumbnail image. Variants: fi, en, clean"""
