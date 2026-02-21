@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+
+{% block title %}Upload - ShortGen{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2 class="mb-2">Upload Video</h2>
+    <p class="text-muted mb-2">Upload a video file to generate a short/reel with captions, titles, and descriptions.</p>
+
+    <form id="upload-form" enctype="multipart/form-data">
+        <div id="drop-zone" style="
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 3rem;
+            text-align: center;
+            cursor: pointer;
+            margin-bottom: 1rem;
+        ">
+            <p style="margin-bottom: 0.5rem;">Drag & drop video file(s) here</p>
+            <p class="text-muted text-small">or click to browse</p>
+            <p class="text-muted text-small mt-2">Supported: MP4, MOV, AVI, MKV, WebM (multiple files will be stitched together)</p>
+            <input type="file" id="file-input" name="files" accept=".mp4,.mov,.avi,.mkv,.webm" multiple style="display: none;">
+        </div>
+
+        <div id="file-info" style="display: none;" class="mb-2">
+            <p>Selected: <span id="file-name"></span></p>
+        </div>
+
+        <label for="context">What's this video about? (helps AI understand context)</label>
+        <textarea id="context" name="context" rows="2" placeholder="e.g. Processing a 3D scan of my drag car's rear end in CloudCompare"></textarea>
+
+        <div style="margin-bottom: 1rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" id="minimal-cuts" name="minimal_cuts" style="width: auto;">
+                <span>Minimal cuts (keep most content, only remove obvious dead time)</span>
+            </label>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" id="burn-captions" name="burn_captions" style="width: auto;">
+                <span>Burn captions into video (leave off if using CapCut)</span>
+            </label>
+        </div>
+
+        <div style="margin-bottom: 1rem; padding: 1rem; background: var(--bg-secondary); border-radius: 8px;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" id="precaptioned" name="precaptioned" style="width: auto;">
+                <span><strong>Pre-captioned video</strong> (from CapCut or other editor)</span>
+            </label>
+            <p class="text-muted text-small" style="margin-left: 1.5rem; margin-top: 0.5rem;">
+                Video already has captions burned in. Will remove CapCut watermark/outro, add your watermark, and generate titles/tags.
+            </p>
+            <div id="precaptioned-options" style="display: none; margin-left: 1.5rem; margin-top: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem;">
+                    <span>Trim from end (CapCut outro):</span>
+                    <input type="number" id="remove-outro-seconds" name="remove_outro_seconds" value="3" min="0" max="10" step="0.5" style="width: 60px;">
+                    <span>seconds</span>
+                </label>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" id="youtube-autopost" name="youtube_autopost" style="width: auto;">
+                <span>Auto-post to YouTube (as private video)</span>
+            </label>
+            <p class="text-muted text-small" id="youtube-status" style="margin-left: 1.5rem;"></p>
+        </div>
+
+        <button type="submit" class="btn" id="submit-btn" disabled>Upload & Process</button>
+    </form>
+
+    <div id="upload-progress" style="display: none;" class="mt-2">
+        <p>Uploading... <span id="progress-text">0%</span></p>
+        <div style="background: var(--border); height: 8px; border-radius: 4px; overflow: hidden;">
+            <div id="progress-bar" style="background: var(--primary); height: 100%; width: 0%; transition: width 0.2s;"></div>
+        </div>
+    </div>
+
+    <div id="upload-result" style="display: none;" class="mt-2 card">
+        <p class="mb-1">Processing started!</p>
+        <a id="job-link" href="#" class="btn">View Job Status</a>
+    </div>
+</div>
+
+<script>
+    const dropZone = document.getElementById('drop-zone');
+    const fileInput = document.getElementById('file-input');
+    const fileInfo = document.getElementById('file-info');
+    const fileName = document.getElementById('file-name');
+    const submitBtn = document.getElementById('submit-btn');
+    const form = document.getElementById('upload-form');
+
+    // Click to browse
+    dropZone.addEventListener('click', () => fileInput.click());
+
+    // Drag & drop
+    dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = 'var(--primary)';
+    });
+
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.style.borderColor = 'var(--border)';
+    });
+
+    dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.style.borderColor = 'var(--border)';
+        if (e.dataTransfer.files.length) {
+            fileInput.files = e.dataTransfer.files;
+            handleFileSelect();
+        }
+    });
+
+    fileInput.addEventListener('change', handleFileSelect);
+
+    function handleFileSelect() {
+        if (fileInput.files.length) {
+            const names = Array.from(fileInput.files).map(f => f.name).join(', ');
+            fileName.textContent = fileInput.files.length > 1
+                ? `${fileInput.files.length} files: ${names}`
+                : names;
+            fileInfo.style.display = 'block';
+            submitBtn.disabled = false;
+        }
+    }
+
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const formData = new FormData();
+        for (const file of fileInput.files) {
+            formData.append('files', file);
+        }
+        formData.append('context', document.getElementById('context').value);
+        formData.append('minimal_cuts', document.getElementById('minimal-cuts').checked ? 'true' : 'false');
+        formData.append('burn_captions', document.getElementById('burn-captions').checked ? 'true' : 'false');
+        formData.append('youtube_autopost', document.getElementById('youtube-autopost').checked ? 'true' : 'false');
+        formData.append('precaptioned', document.getElementById('precaptioned').checked ? 'true' : 'false');
+        formData.append('remove_outro_seconds', document.getElementById('remove-outro-seconds').value);
+
+        const progress = document.getElementById('upload-progress');
+        const progressBar = document.getElementById('progress-bar');
+        const progressText = document.getElementById('progress-text');
+        const result = document.getElementById('upload-result');
+
+        progress.style.display = 'block';
+        submitBtn.disabled = true;
+
+        try {
+            const xhr = new XMLHttpRequest();
+
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const pct = Math.round((e.loaded / e.total) * 100);
+                    progressBar.style.width = pct + '%';
+                    progressText.textContent = pct + '%';
+                }
+            });
+
+            xhr.addEventListener('load', () => {
+                if (xhr.status === 200) {
+                    const data = JSON.parse(xhr.responseText);
+                    progress.style.display = 'none';
+                    result.style.display = 'block';
+                    document.getElementById('job-link').href = '/job/' + data.job_id;
+                } else {
+                    alert('Upload failed: ' + xhr.responseText);
+                    progress.style.display = 'none';
+                    submitBtn.disabled = false;
+                }
+            });
+
+            xhr.open('POST', '/api/upload');
+            xhr.send(formData);
+        } catch (err) {
+            alert('Upload failed: ' + err.message);
+            progress.style.display = 'none';
+            submitBtn.disabled = false;
+        }
+    });
+
+    // Toggle precaptioned options
+    const precaptionedCheckbox = document.getElementById('precaptioned');
+    const precaptionedOptions = document.getElementById('precaptioned-options');
+    const burnCaptionsCheckbox = document.getElementById('burn-captions');
+    const minimalCutsCheckbox = document.getElementById('minimal-cuts');
+
+    precaptionedCheckbox.addEventListener('change', () => {
+        precaptionedOptions.style.display = precaptionedCheckbox.checked ? 'block' : 'none';
+        // Disable burn-captions and minimal-cuts when precaptioned (they don't apply)
+        burnCaptionsCheckbox.disabled = precaptionedCheckbox.checked;
+        minimalCutsCheckbox.disabled = precaptionedCheckbox.checked;
+        if (precaptionedCheckbox.checked) {
+            burnCaptionsCheckbox.checked = false;
+            minimalCutsCheckbox.checked = false;
+        }
+    });
+
+    // Check YouTube status
+    async function checkYouTubeStatus() {
+        try {
+            const resp = await fetch('/api/youtube/status');
+            const data = await resp.json();
+            const statusEl = document.getElementById('youtube-status');
+            const checkbox = document.getElementById('youtube-autopost');
+
+            if (!data.credentials_configured) {
+                statusEl.innerHTML = '<a href="/api/youtube/auth">YouTube not configured</a>';
+                checkbox.disabled = true;
+            } else if (!data.authenticated) {
+                statusEl.innerHTML = '<a href="/api/youtube/auth">Click to connect YouTube</a>';
+                checkbox.disabled = true;
+            } else {
+                statusEl.innerHTML = 'YouTube connected';
+                statusEl.style.color = '#4caf50';
+            }
+        } catch (e) {
+            console.error('Failed to check YouTube status', e);
+        }
+    }
+    checkYouTubeStatus();
+</script>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+
+{% block title %}Jobs - ShortGen{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2 class="mb-2">Recent Jobs</h2>
+
+    {% if jobs %}
+    <table style="width: 100%; border-collapse: collapse;">
+        <thead>
+            <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                <th style="padding: 0.75rem;">File</th>
+                <th style="padding: 0.75rem;">Status</th>
+                <th style="padding: 0.75rem;">Created</th>
+                <th style="padding: 0.75rem;"></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for job in jobs %}
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.75rem;">
+                    <span>{{ job.original_filename or 'Untitled' }}</span>
+                    <br>
+                    <span class="text-muted text-small">{{ job.id[:8] }}...</span>
+                </td>
+                <td style="padding: 0.75rem;">
+                    <span class="status status-{{ job.status }}">{{ job.status }}</span>
+                    {% if job.current_step %}
+                    <br>
+                    <span class="text-muted text-small">{{ job.current_step }}</span>
+                    {% endif %}
+                </td>
+                <td style="padding: 0.75rem;" class="text-muted text-small">
+                    {{ job.created_at[:16] if job.created_at else '' }}
+                </td>
+                <td style="padding: 0.75rem;">
+                    <a href="/job/{{ job.id }}" class="btn btn-secondary" style="padding: 0.5rem 1rem;">View</a>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted">No jobs yet. <a href="/" style="color: var(--primary);">Upload a video</a> to get started.</p>
+    {% endif %}
+</div>
+
+<script>
+// Auto-refresh if any jobs are processing
+const hasProcessing = {{ 'true' if jobs and jobs|selectattr('status', 'in', ['pending', 'transcribing', 'analyzing', 'rendering'])|list else 'false' }};
+if (hasProcessing) {
+    setInterval(() => location.reload(), 5000);
+}
+</script>
+{% endblock %}

@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Job {{ job.id[:8] }} - ShortGen{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <div>
+            <h2>{{ job.original_filename or 'Untitled' }}</h2>
+            <p class="text-muted text-small">{{ job.id }}</p>
+        </div>
+        <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <span class="status status-{{ job.status }}">{{ job.status }}</span>
+            <button class="btn btn-secondary" onclick="deleteJob()" style="padding: 0.5rem 1rem; background: #c62828;">Delete</button>
+        </div>
+    </div>
+
+    {% if job.current_step %}
+    <p class="text-muted mb-2">{{ job.current_step }}</p>
+    {% endif %}
+
+    {% if job.error_message %}
+    <div style="background: #c62828; padding: 1rem; border-radius: 4px; margin-bottom: 1rem;">
+        <strong>Error:</strong> {{ job.error_message }}
+    </div>
+    {% endif %}
+</div>
+
+{% if job.status in ['review', 'completed'] %}
+
+<!-- Video Preview -->
+<div class="card">
+    <h3 class="mb-2">Preview</h3>
+    <video controls style="width: 100%; max-height: 400px; background: #000;">
+        <source src="/api/jobs/{{ job.id }}/video" type="video/mp4">
+    </video>
+</div>
+
+<!-- Thumbnails -->
+<div class="card">
+    <h3 class="mb-2">Thumbnails</h3>
+    <div class="grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
+        <div>
+            <img src="/api/jobs/{{ job.id }}/thumbnail/fi" alt="Finnish Thumbnail"
+                 style="width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #000; border-radius: 4px;">
+            <p class="text-muted text-small mt-2">Suomi</p>
+        </div>
+        <div>
+            <img src="/api/jobs/{{ job.id }}/thumbnail/en" alt="English Thumbnail"
+                 style="width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #000; border-radius: 4px;">
+            <p class="text-muted text-small mt-2">English</p>
+        </div>
+        <div>
+            <img src="/api/jobs/{{ job.id }}/thumbnail/clean" alt="Clean Thumbnail"
+                 style="width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #000; border-radius: 4px;">
+            <p class="text-muted text-small mt-2">Clean (no text)</p>
+        </div>
+    </div>
+</div>
+
+<!-- Generated Content - Finnish -->
+<div class="card">
+    <h3 class="mb-2">Suomeksi (Finnish)</h3>
+
+    <label>Otsikko / Title</label>
+    <input type="text" id="title_fi" value="{{ job.suggested_title_fi or '' }}">
+
+    <label>Kuvaus / Description</label>
+    <textarea id="description_fi" rows="3">{{ job.suggested_description_fi or '' }}</textarea>
+
+    <label>Koukku / Hook</label>
+    <input type="text" id="hook_fi" value="{{ job.suggested_hook_fi or '' }}" readonly>
+</div>
+
+<!-- Generated Content - English -->
+<div class="card">
+    <h3 class="mb-2">English</h3>
+
+    <label>Title</label>
+    <input type="text" id="title_en" value="{{ job.suggested_title_en or '' }}">
+
+    <label>Description</label>
+    <textarea id="description_en" rows="3">{{ job.suggested_description_en or '' }}</textarea>
+
+    <label>Hook</label>
+    <input type="text" id="hook_en" value="{{ job.suggested_hook_en or '' }}" readonly>
+</div>
+
+<!-- Hashtags -->
+<div class="card">
+    <h3 class="mb-2">Hashtags</h3>
+    <input type="text" id="hashtags" value="{{ (job.suggested_hashtags or []) | join(' #') | replace(' #', ' #', 1) }}" readonly>
+</div>
+
+<!-- Quick Copy for Manual Posting -->
+<div class="card">
+    <h3 class="mb-2">Quick Copy (for Instagram/TikTok)</h3>
+    <div class="grid grid-2" style="gap: 0.5rem;">
+        <button class="btn btn-secondary" onclick="copyFinnish()">Copy Finnish</button>
+        <button class="btn btn-secondary" onclick="copyEnglish()">Copy English</button>
+    </div>
+    <p class="text-muted text-small mt-2">Copies title + description + hashtags to clipboard</p>
+</div>
+
+<script>
+function copyFinnish() {
+    const title = document.getElementById('title_fi').value;
+    const desc = document.getElementById('description_fi').value;
+    const hashtags = '#' + document.getElementById('hashtags').value.trim().replace(/\s+/g, ' #');
+    const text = `${title}\n\n${desc}\n\n${hashtags}`;
+    navigator.clipboard.writeText(text).then(() => alert('Finnish copied!'));
+}
+
+function copyEnglish() {
+    const title = document.getElementById('title_en').value;
+    const desc = document.getElementById('description_en').value;
+    const hashtags = '#' + document.getElementById('hashtags').value.trim().replace(/\s+/g, ' #');
+    const text = `${title}\n\n${desc}\n\n${hashtags}`;
+    navigator.clipboard.writeText(text).then(() => alert('English copied!'));
+}
+</script>
+
+<!-- Transcript -->
+<div class="card">
+    <h3 class="mb-2">Transcript</h3>
+    <pre style="white-space: pre-wrap; background: var(--bg); padding: 1rem; border-radius: 4px; max-height: 200px; overflow-y: auto;">{{ job.transcript or 'No transcript available' }}</pre>
+</div>
+
+{% if job.youtube_url %}
+<!-- YouTube -->
+<div class="card">
+    <h3 class="mb-2">YouTube</h3>
+    <p style="margin-bottom: 0.5rem;">Video uploaded to YouTube (private):</p>
+    <a href="{{ job.youtube_url }}" target="_blank" class="btn" style="background: #c4302b;">View on YouTube</a>
+    <p class="text-muted text-small mt-2">Video ID: {{ job.youtube_video_id }}</p>
+</div>
+{% endif %}
+
+<!-- Export -->
+<div class="card">
+    <h3 class="mb-2">Export</h3>
+    <a href="/api/jobs/{{ job.id }}/export" class="btn">Download Export Pack (ZIP)</a>
+    <p class="text-muted text-small mt-2">Contains: video.mp4, thumbnail.jpg, captions.srt, metadata.json</p>
+</div>
+
+{% elif job.status in ['pending', 'transcribing', 'analyzing', 'rendering'] %}
+
+<!-- Processing Status -->
+<div class="card">
+    <h3 class="mb-2">Processing...</h3>
+    <p class="text-muted">This page will auto-refresh when processing completes.</p>
+    <div style="margin-top: 1rem;">
+        <div style="background: var(--border); height: 8px; border-radius: 4px; overflow: hidden;">
+            <div style="background: var(--primary); height: 100%; width:
+                {% if job.status == 'transcribing' %}25{% elif job.status == 'analyzing' %}50{% elif job.status == 'rendering' %}75{% else %}10{% endif %}%;
+                transition: width 0.5s;"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const currentStatus = '{{ job.status }}';
+    setInterval(async () => {
+        const resp = await fetch('/api/jobs/{{ job.id }}');
+        const data = await resp.json();
+        if (data.status !== currentStatus) {
+            location.reload();
+        }
+    }, 3000);
+</script>
+
+{% endif %}
+
+<script>
+async function deleteJob() {
+    if (!confirm('Delete this job and all its files?')) return;
+
+    const resp = await fetch('/api/jobs/{{ job.id }}', { method: 'DELETE' });
+    if (resp.ok) {
+        window.location.href = '/jobs';
+    } else {
+        alert('Delete failed');
+    }
+}
+</script>
+{% endblock %}
