@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     # API Keys
     openai_api_key: str = ""
     anthropic_api_key: str = ""
+    groq_api_key: str = ""
 
     # Database
     database_url: str = "postgresql://shortgen:shortgen_pwd_2024@localhost/shortgen"

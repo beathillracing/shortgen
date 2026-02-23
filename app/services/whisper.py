@@ -1,7 +1,7 @@
 """
-Speech-to-text using OpenAI Whisper API with custom vocabulary support.
+Speech-to-text using Groq Whisper large-v3 API with custom vocabulary support.
 """
-from openai import OpenAI
+from groq import Groq
 from app.config import settings
 
 # Common Finglish/technical terms to help Whisper recognize
@@ -18,16 +18,50 @@ DEFAULT_VOCABULARY = [
     "renderöi", "renderöin", "exporttaa", "importtaa", "softa",
     # Car/racing terms
     "drag car", "dragster", "turbo", "boost", "dyno",
+    "ECU", "ecuun", "ecun", "ecua",  # engine control unit
     "pervo", "pervoja", "pervojen",  # rear wing/spoiler parts
     "visio", "visioita", "visioon",  # vision/design
     # General Finglish
     "upgradeta", "downloadaa", "uploadaa", "streamaa", "settingit",
 ]
 
+# Auto-corrections for common Whisper mistakes (case-insensitive)
+# Format: "wrong" -> "correct"
+AUTO_CORRECTIONS = {
+    # pervo (rear wing parts)
+    "perhoja": "pervoja",
+    "perhoa": "pervoa",
+    "perho": "pervo",
+    "perhot": "pervot",
+    "perhojen": "pervojen",
+    # align (3D scanning term)
+    "ala-ain": "alignaan",
+    "alainaan": "alignaan",
+    "alainaa": "alignaa",
+    "alainin": "alignin",
+    "alain": "align",
+    "ala-ainaan": "alignaan",
+    # ECU (engine control unit)
+    "EQ": "ECU",
+    "eq": "ECU",
+    # Add more as you find them
+}
+
+
+def apply_corrections(text: str) -> str:
+    """Apply auto-corrections to transcript text."""
+    import re
+    result = text
+    for wrong, correct in AUTO_CORRECTIONS.items():
+        # Case-insensitive replacement, preserving original case
+        pattern = re.compile(re.escape(wrong), re.IGNORECASE)
+        result = pattern.sub(correct, result)
+    return result
+
 
 def transcribe_audio(audio_path: str, custom_vocabulary: list = None) -> dict:
     """
-    Transcribe audio using OpenAI Whisper API.
+    Transcribe audio using Groq Whisper large-v3 API.
 
     Args:
         audio_path: Path to audio file
@@ -36,7 +70,7 @@ def transcribe_audio(audio_path: str, custom_vocabulary: list = None) -> dict:
     Returns:
         dict with transcript text and SRT content
     """
-    client = OpenAI(api_key=settings.openai_api_key)
+    client = Groq(api_key=settings.groq_api_key)
 
     # Build prompt with vocabulary hints
     vocab = DEFAULT_VOCABULARY.copy()
@@ -51,9 +85,9 @@ def transcribe_audio(audio_path: str, custom_vocabulary: list = None) -> dict:
 
     # Get transcript with word-level timestamps
     with open(audio_path, "rb") as f:
-        # First get the verbose JSON for timestamps
+        # Groq's API with verbose_json for timestamps
         response = client.audio.transcriptions.create(
-            model="whisper-1",
+            model="whisper-large-v3",  # Full large-v3, not turbo
             file=f,
             language="fi",
             response_format="verbose_json",
@@ -61,8 +95,8 @@ def transcribe_audio(audio_path: str, custom_vocabulary: list = None) -> dict:
             prompt=prompt
         )
 
-    # Extract transcript
-    transcript = response.text
+    # Extract transcript and apply auto-corrections
+    transcript = apply_corrections(response.text)
 
     # Build SRT from word timestamps if available
     srt_segments = []
@@ -72,10 +106,19 @@ def transcribe_audio(audio_path: str, custom_vocabulary: list = None) -> dict:
         # Use word-level timestamps
         word_buffer = []
         for word_info in response.words:
+            # Handle both dict and object responses (Groq vs OpenAI)
+            if isinstance(word_info, dict):
+                word = word_info.get("word", "")
+                start = word_info.get("start", 0)
+                end = word_info.get("end", 0)
+            else:
+                word = word_info.word
+                start = word_info.start
+                end = word_info.end
             word_buffer.append({
-                "word": word_info.word,
-                "start": word_info.start,
-                "end": word_info.end,
+                "word": apply_corrections(word),
+                "start": start,
+                "end": end,
             })
 
             # Create segment every 4-5 words or at punctuation
@@ -115,7 +158,20 @@ def transcribe_audio(audio_path: str, custom_vocabulary: list = None) -> dict:
     # Generate karaoke ASS if we have word timestamps
     ass_content = ""
     if hasattr(response, 'words') and response.words:
-        word_list = [{"word": w.word, "start": w.start, "end": w.end} for w in response.words]
+        word_list = []
+        for w in response.words:
+            if isinstance(w, dict):
+                word_list.append({
+                    "word": apply_corrections(w.get("word", "")),
+                    "start": w.get("start", 0),
+                    "end": w.get("end", 0)
+                })
+            else:
+                word_list.append({
+                    "word": apply_corrections(w.word),
+                    "start": w.start,
+                    "end": w.end
+                })
         ass_content = generate_karaoke_ass(word_list)
 
     return {
@@ -186,8 +242,8 @@ def seconds_to_srt_time(seconds: float) -> str:
 
 def generate_karaoke_ass(words: list, video_width: int = 1080, video_height: int = 1920) -> str:
     """
-    Generate ASS subtitle file with karaoke-style word highlighting.
-    Words highlight in green as they're spoken.
+    Generate ASS subtitle file with CapCut-style word pop effect.
+    Shows 2-3 words at a time, current word highlighted and scaled.
 
     Args:
         words: List of {word, start, end} dicts with timestamps
@@ -196,18 +252,18 @@ def generate_karaoke_ass(words: list, video_width: int = 1080, video_height: int
     Returns:
         ASS file content as string
     """
-    # ASS header with styles
+    # ASS header with styles - CapCut style with Poppins font and thick outline
     ass_header = f"""[Script Info]
-Title: Karaoke Subtitles
+Title: Pop Subtitles
 ScriptType: v4.00+
 PlayResX: {video_width}
 PlayResY: {video_height}
 WrapStyle: 0
+ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Default,Arial Black,60,&HFFFFFF,&H00FF00,&H000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,2,40,40,80,1
-Style: Highlight,Arial Black,60,&H00FF00,&H00FF00,&H000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,0,2,40,40,80,1
+Style: Word,Poppins Black,90,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,40,40,150,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -215,55 +271,57 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
     events = []
 
-    # Group words into lines (4-5 words per line)
-    lines = []
-    current_line = []
+    # Group words into chunks of 2-3 words
+    chunks = []
+    current_chunk = []
 
     for word_info in words:
-        current_line.append(word_info)
+        current_chunk.append(word_info)
         word_text = word_info["word"].strip()
 
-        # Start new line after 4 words or at sentence end
-        if len(current_line) >= 4 or word_text.endswith((".", "!", "?", ",")):
-            if current_line:
-                lines.append(current_line)
-                current_line = []
+        # New chunk after 3 words or at punctuation
+        if len(current_chunk) >= 3 or word_text.endswith((".", "!", "?", ",")):
+            if current_chunk:
+                chunks.append(current_chunk)
+                current_chunk = []
 
-    if current_line:
-        lines.append(current_line)
+    if current_chunk:
+        chunks.append(current_chunk)
 
-    # Generate karaoke events for each line
-    for line_words in lines:
-        if not line_words:
+    # Generate events - each word gets highlighted when spoken
+    for chunk in chunks:
+        if not chunk:
             continue
 
-        line_start = line_words[0]["start"]
-        line_end = line_words[-1]["end"]
+        chunk_start = chunk[0]["start"]
+        chunk_end = chunk[-1]["end"] + 0.1  # Small buffer
 
-        # Build karaoke text with \k tags
-        # \k duration is in centiseconds (1/100 sec)
-        karaoke_text = ""
+        # For each word in the chunk, show the full chunk with current word highlighted
+        for i, current_word in enumerate(chunk):
+            word_start = current_word["start"]
+            word_end = current_word["end"]
 
-        for i, word_info in enumerate(line_words):
-            word = word_info["word"].strip()
-            word_start = word_info["start"]
-            word_end = word_info["end"]
+            # Build the line: previous words dim, current word GREEN + BIGGER, next words dim
+            parts = []
+            for j, w in enumerate(chunk):
+                word_text = w["word"].strip()
+                if j < i:
+                    # Already spoken - white, normal size
+                    parts.append(f"{{\\c&HFFFFFF&\\fscx100\\fscy100}}{word_text}")
+                elif j == i:
+                    # Current word - GREEN, slightly bigger, with pop animation
+                    parts.append(f"{{\\c&H00FF66&\\fscx115\\fscy115\\t(0,50,\\fscx100\\fscy100)}}{word_text}")
+                else:
+                    # Not yet spoken - white, normal
+                    parts.append(f"{{\\c&HFFFFFF&\\fscx100\\fscy100}}{word_text}")
 
-            # Duration of this word in centiseconds
-            duration_cs = int((word_end - word_start) * 100)
-            duration_cs = max(duration_cs, 10)  # Minimum 0.1 sec
+            line_text = " ".join(parts)
 
-            # Use \kf for smooth fill effect (green highlight)
-            # {\kf<duration>} highlights over duration
-            karaoke_text += f"{{\\kf{duration_cs}}}{word} "
+            # Format timestamps
+            start_ts = seconds_to_ass_time(word_start)
+            end_ts = seconds_to_ass_time(word_end)
 
-        karaoke_text = karaoke_text.strip()
-
-        # Format timestamps for ASS (H:MM:SS.cc)
-        start_ts = seconds_to_ass_time(line_start)
-        end_ts = seconds_to_ass_time(line_end + 0.5)  # Add small buffer
-
-        events.append(f"Dialogue: 0,{start_ts},{end_ts},Default,,0,0,0,,{karaoke_text}")
+            events.append(f"Dialogue: 0,{start_ts},{end_ts},Word,,0,0,0,,{line_text}")
 
     return ass_header + "\n".join(events) + "\n"
 

@@ -11,6 +11,7 @@ def append_outro(input_path: str, output_path: str) -> str:
     """
     Append the outro clip to the end of a video.
     The outro should be at assets/outro.mp4
+    Uses filter_complex concat to handle videos with different specs.
     """
     outro_path = settings.assets_path / "outro.mp4"
     if not outro_path.exists():
@@ -18,24 +19,26 @@ def append_outro(input_path: str, output_path: str) -> str:
         shutil.copy(input_path, output_path)
         return output_path
 
-    # Create concat file
-    concat_file = Path(output_path).parent / "concat_outro.txt"
-    with open(concat_file, "w") as f:
-        f.write(f"file '{input_path}'\n")
-        f.write(f"file '{outro_path}'\n")
-
+    # Use filter_complex concat for reliable joining of different video specs
     cmd = [
         "ffmpeg",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", str(concat_file),
-        "-c", "copy",
+        "-i", input_path,
+        "-i", str(outro_path),
+        "-filter_complex",
+        "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
+        "-map", "[outv]",
+        "-map", "[outa]",
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "23",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
         "-y",
         output_path
     ]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
-    concat_file.unlink(missing_ok=True)
 
     if result.returncode != 0:
         raise RuntimeError(f"Outro append failed: {result.stderr}")
@@ -113,15 +116,16 @@ def extract_frame(video_path: str, output_path: str, timestamp: float = 0) -> st
 def extract_thumbnail_candidates(video_path: str, output_dir: str, count: int = 10) -> list:
     """
     Extract multiple frames from video as thumbnail candidates.
-    Spreads them evenly across the video duration.
+    First frame at ~1 second, last frame at ~5 seconds before end,
+    rest distributed evenly between.
     Returns list of paths to extracted frames.
     """
     video_info = get_video_info(video_path)
     duration = video_info["duration"]
 
-    # Don't include the very start or end (often black/transitions)
-    start_offset = duration * 0.05  # Skip first 5%
-    end_offset = duration * 0.95    # Skip last 5%
+    # Start at 0.5 seconds (catch opening shots), end 5 seconds before the end
+    start_offset = 0.5
+    end_offset = max(duration - 5.0, start_offset + 1.0)
     usable_duration = end_offset - start_offset
 
     paths = []
@@ -140,7 +144,7 @@ def extract_thumbnail_candidates(video_path: str, output_dir: str, count: int = 
         ]
 
         result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode == 0:
+        if result.returncode == 0 and Path(output_path).exists():
             paths.append({
                 "path": output_path,
                 "timestamp": timestamp,
@@ -248,6 +252,196 @@ def render_video_with_captions(
     return output_path
 
 
+def render_video_with_captions_and_outro(
+    input_path: str,
+    output_path: str,
+    srt_path: Optional[str] = None,
+    ass_path: Optional[str] = None,
+    watermark_path: Optional[str] = None,
+    burn_captions: bool = True,
+    target_width: int = 1080,
+    target_height: int = 1920,
+    job_id: Optional[str] = None,
+    thumbnail_path: Optional[str] = None,
+    thumbnail_duration: float = 0.3,
+) -> str:
+    """
+    Render video with captions, watermark, and outro - ALL IN ONE ENCODE.
+    Much faster than separate render + outro append.
+
+    If thumbnail_path is provided, prepends the thumbnail as a brief frame
+    at the start (YouTube Shorts workaround for thumbnail selection).
+    """
+    video_info = get_video_info(input_path)
+    duration = video_info["duration"]
+
+    # Default watermark path
+    if watermark_path is None:
+        default_watermark = settings.assets_path / "watermark.png"
+        if default_watermark.exists():
+            watermark_path = str(default_watermark)
+
+    has_watermark = watermark_path and Path(watermark_path).exists()
+    has_thumbnail = thumbnail_path and Path(thumbnail_path).exists()
+
+    # Check for outro
+    outro_path = settings.assets_path / "outro.mp4"
+    has_outro = outro_path.exists()
+
+    cmd = ["ffmpeg"]
+    input_idx = 0
+
+    # Add thumbnail input first (as image with duration)
+    if has_thumbnail:
+        cmd.extend([
+            "-loop", "1",
+            "-t", str(thumbnail_duration),
+            "-i", thumbnail_path,
+        ])
+        thumb_idx = input_idx
+        input_idx += 1
+
+    # Add main video
+    cmd.extend(["-i", input_path])
+    main_video_idx = input_idx
+    input_idx += 1
+
+    # Add watermark input if exists
+    if has_watermark:
+        cmd.extend(["-i", watermark_path])
+        watermark_idx = input_idx
+        input_idx += 1
+
+    # Add outro input if exists
+    if has_outro:
+        cmd.extend(["-i", str(outro_path)])
+        outro_idx = input_idx
+
+    # Build filter chain
+    filter_parts = []
+
+    # Scale and pad main video to 9:16
+    filter_parts.append(
+        f"[{main_video_idx}:v]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
+        f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black[scaled]"
+    )
+
+    current_video = "[scaled]"
+
+    # Add watermark overlay (top-right, transparent)
+    if has_watermark:
+        watermark_width = int(target_width * 0.18)  # ~195px wide
+        padding = 15
+        filter_parts.append(
+            f"[{watermark_idx}:v]scale={watermark_width}:-1[wm]"
+        )
+        filter_parts.append(
+            f"{current_video}[wm]overlay=W-w-{padding}:{padding}[watermarked]"
+        )
+        current_video = "[watermarked]"
+
+    # Add subtitles if burn_captions is True
+    if burn_captions:
+        # Prefer ASS (karaoke style) over SRT
+        if ass_path and Path(ass_path).exists():
+            escaped_ass = ass_path.replace(":", "\\:").replace("'", "\\'")
+            filter_parts.append(f"{current_video}ass={escaped_ass}[captioned]")
+            current_video = "[captioned]"
+        elif srt_path and Path(srt_path).exists():
+            escaped_srt = srt_path.replace(":", "\\:").replace("'", "\\'")
+            filter_parts.append(
+                f"{current_video}subtitles={escaped_srt}:force_style='"
+                "FontName=Arial Bold,FontSize=10,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,"
+                "BackColour=&H80000000,Outline=1,Shadow=0,Alignment=2,MarginV=25'[captioned]"
+            )
+            current_video = "[captioned]"
+
+    # Rename to main_video for concat
+    filter_parts.append(f"{current_video}copy[main_video]")
+
+    # Prepare thumbnail if exists (scale to target resolution)
+    if has_thumbnail:
+        filter_parts.append(
+            f"[{thumb_idx}:v]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
+            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black,fps=30[thumb_v]"
+        )
+        # Generate silence for the thumbnail duration
+        filter_parts.append(
+            f"anullsrc=r=44100:cl=stereo,atrim=0:{thumbnail_duration}[thumb_a]"
+        )
+
+    # Build concat chain: thumbnail (optional) -> main -> outro (optional)
+    video_streams = []
+    audio_streams = []
+
+    if has_thumbnail:
+        video_streams.append("[thumb_v]")
+        audio_streams.append("[thumb_a]")
+
+    video_streams.append("[main_video]")
+    audio_streams.append(f"[{main_video_idx}:a]")
+
+    if has_outro:
+        filter_parts.append(
+            f"[{outro_idx}:v]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
+            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black[outro_v]"
+        )
+        video_streams.append("[outro_v]")
+        audio_streams.append(f"[{outro_idx}:a]")
+
+    # Concat all parts if more than one stream
+    if len(video_streams) > 1:
+        n_parts = len(video_streams)
+        filter_parts.append(
+            f"{''.join(video_streams)}concat=n={n_parts}:v=1:a=0[final_v]"
+        )
+        filter_parts.append(
+            f"{''.join(audio_streams)}concat=n={n_parts}:v=0:a=1[final_a]"
+        )
+        final_video = "[final_v]"
+        final_audio = "[final_a]"
+    else:
+        final_video = "[main_video]"
+        final_audio = f"[{main_video_idx}:a]"
+
+    # Build complete filter_complex string
+    filter_complex = ";".join(filter_parts)
+
+    cmd.extend([
+        "-filter_complex", filter_complex,
+        "-map", final_video,
+        "-map", final_audio,
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", "23",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
+        "-y",
+        output_path
+    ])
+
+    # Calculate total duration for progress
+    total_duration = duration
+    if has_thumbnail:
+        total_duration += thumbnail_duration
+    if has_outro:
+        outro_info = get_video_info(str(outro_path))
+        total_duration += outro_info["duration"]
+
+    # Use progress tracking if job_id provided
+    if job_id:
+        from app.services.progress import run_ffmpeg_with_progress
+        result = run_ffmpeg_with_progress(cmd, job_id, total_duration, "Rendering video")
+    else:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode != 0:
+        raise RuntimeError(f"Video rendering failed: {result.stderr}")
+
+    return output_path
+
+
 def stitch_videos(input_paths: list, output_path: str) -> str:
     """Stitch multiple video files together in order."""
     if len(input_paths) == 1:
@@ -290,24 +484,28 @@ def remove_capcut_watermark(
     watermark_path: Optional[str] = None,
     target_width: int = 1080,
     target_height: int = 1920,
+    job_id: Optional[str] = None,
+    duration: Optional[float] = None,
+    append_outro: bool = True,
 ) -> str:
     """
-    Remove CapCut watermark and add custom watermark.
+    Remove CapCut watermark, add custom watermark, and append outro - ALL IN ONE ENCODE.
 
     CapCut free tier adds:
     1. An outro screen at the end (2-3 seconds)
     2. Sometimes a small corner watermark (bottom-right)
 
     This function:
-    - Trims the outro from the end
-    - Covers the corner watermark area with a blur/box
-    - Adds your own watermark
-    - Scales to 9:16 format if needed
+    - Trims the CapCut outro from the end
+    - Covers the corner watermark area with black box + our logo
+    - Appends our outro clip
+    - Scales to 9:16 format
+    - Does it all in ONE FFmpeg pass for speed
     """
     # Get video duration to calculate trim point
     video_info = get_video_info(input_path)
-    duration = video_info["duration"]
-    trim_to = max(duration - trim_end_seconds, 1.0)
+    vid_duration = video_info["duration"]
+    trim_to = max(vid_duration - trim_end_seconds, 1.0)
 
     # Default watermark path
     if watermark_path is None:
@@ -317,61 +515,91 @@ def remove_capcut_watermark(
 
     has_watermark = watermark_path and Path(watermark_path).exists()
 
+    # Check for outro
+    outro_path = settings.assets_path / "outro.mp4"
+    has_outro = append_outro and outro_path.exists()
+
     cmd = ["ffmpeg", "-i", input_path]
+    input_idx = 1
 
     # Add watermark input if exists
     if has_watermark:
         cmd.extend(["-i", watermark_path])
+        watermark_idx = input_idx
+        input_idx += 1
+
+    # Add outro input if exists
+    if has_outro:
+        cmd.extend(["-i", str(outro_path)])
+        outro_idx = input_idx
 
     # Build filter chain
     filter_parts = []
 
-    # Scale and pad video to 9:16 (in case it's not already)
+    # Scale and pad main video to 9:16, trim it
     filter_parts.append(
-        f"[0:v]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
+        f"[0:v]trim=0:{trim_to},setpts=PTS-STARTPTS,"
+        f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
         f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black[scaled]"
     )
+    filter_parts.append(
+        f"[0:a]atrim=0:{trim_to},asetpts=PTS-STARTPTS[main_audio]"
+    )
 
-    current_output = "[scaled]"
+    current_video = "[scaled]"
 
-    # Cover CapCut corner watermark (bottom-right area) with a subtle blur box
-    if cover_corner:
-        # CapCut watermark is typically ~200x50px in bottom-right
-        # We'll blur that area slightly
-        box_w = 220
-        box_h = 60
-        box_x = target_width - box_w - 10  # 10px from right edge
-        box_y = target_height - box_h - 10  # 10px from bottom
-
-        # Use delogo filter to blur/remove the watermark area
-        filter_parts.append(
-            f"{current_output}delogo=x={box_x}:y={box_y}:w={box_w}:h={box_h}:show=0[cleaned]"
-        )
-        current_output = "[cleaned]"
-
-    # Add our own watermark overlay if present
+    # Add our own watermark overlay - position it over the CapCut logo (top-left)
     if has_watermark:
-        watermark_width = int(target_width * 0.15)
-        padding = 20
+        watermark_width = int(target_width * 0.28)  # ~300px wide
+        x_pos = 5
+        y_pos = 5
+
+        # Scale logo
         filter_parts.append(
-            f"[1:v]scale={watermark_width}:-1[wm]"
+            f"[{watermark_idx}:v]scale={watermark_width}:-1[wm_scaled]"
+        )
+
+        # Draw black box to cover CapCut logo, then overlay our logo
+        box_w = watermark_width + 20
+        box_h = 150
+        filter_parts.append(
+            f"{current_video}drawbox=x=0:y=0:w={box_w}:h={box_h}:color=black:t=fill[boxed]"
         )
         filter_parts.append(
-            f"{current_output}[wm]overlay=W-w-{padding}:{padding}[final]"
+            f"[boxed][wm_scaled]overlay={x_pos}:{y_pos}[main_video]"
         )
-        current_output = "[final]"
+        current_video = "[main_video]"
+    else:
+        filter_parts.append(f"{current_video}copy[main_video]")
+        current_video = "[main_video]"
+
+    # Concat with outro if exists
+    if has_outro:
+        filter_parts.append(
+            f"[{outro_idx}:v]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
+            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black[outro_v]"
+        )
+        filter_parts.append(
+            f"{current_video}[outro_v]concat=n=2:v=1:a=0[final_v]"
+        )
+        filter_parts.append(
+            f"[main_audio][{outro_idx}:a]concat=n=2:v=0:a=1[final_a]"
+        )
+        final_video = "[final_v]"
+        final_audio = "[final_a]"
+    else:
+        final_video = current_video
+        final_audio = "[main_audio]"
 
     # Build complete filter_complex string
     filter_complex = ";".join(filter_parts)
-    map_output = current_output.strip("[]")
 
     cmd.extend([
         "-filter_complex", filter_complex,
-        "-map", f"[{map_output}]",
-        "-map", "0:a?",
-        "-t", str(trim_to),  # Trim to remove CapCut outro
+        "-map", final_video,
+        "-map", final_audio,
         "-c:v", "libx264",
-        "-preset", "medium",
+        "-preset", "fast",  # faster encoding
         "-crf", "23",
         "-c:a", "aac",
         "-b:a", "128k",
@@ -380,7 +608,19 @@ def remove_capcut_watermark(
         output_path
     ])
 
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    # Calculate total duration for progress
+    total_duration = trim_to
+    if has_outro:
+        outro_info = get_video_info(str(outro_path))
+        total_duration += outro_info["duration"]
+
+    # Use progress tracking if job_id provided
+    if job_id:
+        from app.services.progress import run_ffmpeg_with_progress
+        result = run_ffmpeg_with_progress(cmd, job_id, total_duration, "Rendering video")
+    else:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
     if result.returncode != 0:
         raise RuntimeError(f"CapCut watermark removal failed: {result.stderr}")
 

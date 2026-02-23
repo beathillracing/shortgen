@@ -12,6 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from app.config import settings
 from app.models import Job
 from app.services import ffmpeg, whisper, claude, storage, thumbnail
+from app.services.progress import set_progress, clear_progress
 
 
 def get_db_session():
@@ -39,50 +40,49 @@ def process_precaptioned_job(job_id: str):
             raise ValueError(f"Job {job_id} not found")
 
         input_video = job.upload_path
+        video_info = ffmpeg.get_video_info(input_video)
+        duration = video_info["duration"]
 
-        # Step 1: Remove CapCut watermark and add our watermark
-        update_job_status(db, job, "rendering", "Removing CapCut watermark...")
+        # Step 1: Remove CapCut watermark, add our watermark, append outro (0-55%)
+        # All done in ONE FFmpeg pass for speed
+        update_job_status(db, job, "rendering", "Processing video...", 0)
 
         trim_seconds = float(job.remove_outro_seconds or "3")
         output_path = str(storage.get_export_path(job_id, "video.mp4"))
 
-        # First remove CapCut watermark to temp file
-        temp_video_path = str(storage.get_processing_path(job_id, "cleaned.mp4"))
         ffmpeg.remove_capcut_watermark(
             input_video,
-            temp_video_path,
+            output_path,
             trim_end_seconds=trim_seconds,
-            cover_corner=True,  # Cover the corner watermark
+            cover_corner=True,
+            job_id=job_id,
+            duration=duration,
+            append_outro=True,  # Outro appended in same encode
         )
-
-        # Then append outro
-        update_job_status(db, job, "rendering", "Adding outro...")
-        ffmpeg.append_outro(temp_video_path, output_path)
         job.output_video_path = output_path
 
-        # Step 2: Extract audio for transcription
-        update_job_status(db, job, "transcribing", "Extracting audio...")
+        # Step 2: Extract audio for transcription (55%)
+        update_job_status(db, job, "transcribing", "Extracting audio...", 50)
 
-        video_info = ffmpeg.get_video_info(output_path)  # Use processed video
+        video_info = ffmpeg.get_video_info(output_path)
         audio_path = str(storage.get_processing_path(job_id, "audio.mp3"))
         ffmpeg.extract_audio(output_path, audio_path)
 
-        # Step 3: Transcribe (for metadata generation only)
-        update_job_status(db, job, "transcribing", "Transcribing for metadata...")
+        # Step 3: Transcribe (for metadata generation only) (60-75%)
+        update_job_status(db, job, "transcribing", "Transcribing for metadata...", 60)
 
         transcription = whisper.transcribe_audio(audio_path)
         job.transcript = transcription["transcript"]
-        # We don't need SRT since video already has captions
         db.commit()
 
-        # Step 4: Analyze with Claude for titles/tags/descriptions
-        update_job_status(db, job, "analyzing", "Generating titles and tags...")
+        # Step 4: Analyze with Claude for titles/tags/descriptions (75-85%)
+        update_job_status(db, job, "analyzing", "Generating titles and tags...", 75)
 
         analysis = claude.analyze_transcript(
             job.transcript,
             video_info["duration"],
             context=job.context_description,
-            minimal_cuts=True  # No cutting needed, video is already edited
+            minimal_cuts=True
         )
 
         job.suggested_title_fi = analysis.get("title_fi", "")
@@ -94,8 +94,8 @@ def process_precaptioned_job(job_id: str):
         job.suggested_hook_en = analysis.get("hook_en", "")
         db.commit()
 
-        # Step 5: Generate thumbnails
-        update_job_status(db, job, "rendering", "Generating thumbnail candidates...")
+        # Step 5: Generate thumbnails (85-100%)
+        update_job_status(db, job, "rendering", "Generating thumbnail candidates...", 85)
 
         # Extract multiple thumbnail candidates for user to choose from
         thumb_dir = str(storage.get_export_path(job_id, ""))
@@ -129,7 +129,8 @@ def process_precaptioned_job(job_id: str):
         job.thumbnail_path_en = thumb_paths["en"]
 
         # Done!
-        update_job_status(db, job, "review", "Ready for review")
+        update_job_status(db, job, "review", "Ready for review", 100)
+        clear_progress(job_id)
 
     except Exception as e:
         job.status = "failed"
@@ -142,8 +143,10 @@ def process_precaptioned_job(job_id: str):
         db.close()
 
 
-def update_job_status(db, job, status, step):
+def update_job_status(db, job, status, step, percent=None):
     """Helper to update job status."""
     job.status = status
     job.current_step = step
     db.commit()
+    if percent is not None:
+        set_progress(str(job.id), percent, step)

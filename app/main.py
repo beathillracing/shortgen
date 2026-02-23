@@ -98,9 +98,10 @@ async def job_page(request: Request, job_id: str):
             {"request": request, "message": "Job not found"}
         )
 
+    import time
     return templates.TemplateResponse(
         "job.html",
-        {"request": request, "job": job.to_dict()}
+        {"request": request, "job": job, "now": int(time.time())}
     )
 
 

@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Job {{ job.id[:8] }} - ShortGen{% endblock %}
+{% block title %}Job {{ job.id|string|truncate(8, True, '') }} - ShortGen{% endblock %}
 
 {% block content %}
 <div class="card">
@@ -40,7 +40,7 @@
 {% if job.thumbnail_candidates %}
 <div class="card">
     <h3 class="mb-2">Choose Thumbnail</h3>
-    <p class="text-muted text-small mb-2">Click to select a frame, then click "Apply" to regenerate thumbnails with text</p>
+    <p class="text-muted text-small mb-2">Click to select a frame, customize the text, then click "Apply"</p>
     <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; margin-bottom: 1rem;">
         {% for candidate in job.thumbnail_candidates %}
         <div class="thumb-candidate {% if (job.selected_thumbnail_index or '1') == candidate.index|string %}selected{% endif %}"
@@ -54,6 +54,19 @@
         </div>
         {% endfor %}
     </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+        <div>
+            <label for="thumb_text_fi">Finnish text (use Enter for multiple lines)</label>
+            <textarea id="thumb_text_fi" rows="2" placeholder="e.g. LÄHTEEKÖ&#10;KÄYNTIIN?" style="resize: vertical;"></textarea>
+        </div>
+        <div>
+            <label for="thumb_text_en">English text (use Enter for multiple lines)</label>
+            <textarea id="thumb_text_en" rows="2" placeholder="e.g. WILL IT&#10;START?" style="resize: vertical;"></textarea>
+        </div>
+    </div>
+    <p class="text-muted text-small mb-2">Leave empty to auto-generate text with AI. Use Enter for line breaks.</p>
+
     <button class="btn" onclick="applyThumbnail()" id="apply-thumb-btn">Apply Selected Thumbnail</button>
 </div>
 {% endif %}
@@ -63,17 +76,17 @@
     <h3 class="mb-2">Final Thumbnails</h3>
     <div class="grid" style="grid-template-columns: repeat(3, 1fr); gap: 1rem;">
         <div>
-            <img src="/api/jobs/{{ job.id }}/thumbnail/fi?t={{ job.updated_at.timestamp() if job.updated_at else '' }}" alt="Finnish Thumbnail"
+            <img src="/api/jobs/{{ job.id }}/thumbnail/fi?t={{ now }}" alt="Finnish Thumbnail"
                  style="width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #000; border-radius: 4px;">
             <p class="text-muted text-small mt-2">Suomi</p>
         </div>
         <div>
-            <img src="/api/jobs/{{ job.id }}/thumbnail/en?t={{ job.updated_at.timestamp() if job.updated_at else '' }}" alt="English Thumbnail"
+            <img src="/api/jobs/{{ job.id }}/thumbnail/en?t={{ now }}" alt="English Thumbnail"
                  style="width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #000; border-radius: 4px;">
             <p class="text-muted text-small mt-2">English</p>
         </div>
         <div>
-            <img src="/api/jobs/{{ job.id }}/thumbnail/clean?t={{ job.updated_at.timestamp() if job.updated_at else '' }}" alt="Clean Thumbnail"
+            <img src="/api/jobs/{{ job.id }}/thumbnail/clean?t={{ now }}" alt="Clean Thumbnail"
                  style="width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #000; border-radius: 4px;">
             <p class="text-muted text-small mt-2">Clean (no text)</p>
         </div>
@@ -95,10 +108,17 @@ async function applyThumbnail() {
     btn.disabled = true;
     btn.textContent = 'Generating...';
 
+    const textFi = document.getElementById('thumb_text_fi').value.trim();
+    const textEn = document.getElementById('thumb_text_en').value.trim();
+
     const resp = await fetch('/api/jobs/{{ job.id }}/thumbnail/select', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({index: selectedThumbIndex})
+        body: JSON.stringify({
+            index: selectedThumbIndex,
+            text_fi: textFi || null,
+            text_en: textEn || null
+        })
     });
 
     if (resp.ok) {
@@ -142,7 +162,7 @@ async function applyThumbnail() {
 <!-- Hashtags -->
 <div class="card">
     <h3 class="mb-2">Hashtags</h3>
-    <input type="text" id="hashtags" value="{{ (job.suggested_hashtags or []) | join(' #') | replace(' #', ' #', 1) }}" readonly>
+    <input type="text" id="hashtags" value="#{{ (job.suggested_hashtags or []) | join(' #') }}" readonly>
 </div>
 
 <!-- Quick Copy for Manual Posting -->
@@ -159,7 +179,7 @@ async function applyThumbnail() {
 function copyFinnish() {
     const title = document.getElementById('title_fi').value;
     const desc = document.getElementById('description_fi').value;
-    const hashtags = '#' + document.getElementById('hashtags').value.trim().replace(/\s+/g, ' #');
+    const hashtags = document.getElementById('hashtags').value.trim();
     const text = `${title}\n\n${desc}\n\n${hashtags}`;
     navigator.clipboard.writeText(text).then(() => alert('Finnish copied!'));
 }
@@ -167,7 +187,7 @@ function copyFinnish() {
 function copyEnglish() {
     const title = document.getElementById('title_en').value;
     const desc = document.getElementById('description_en').value;
-    const hashtags = '#' + document.getElementById('hashtags').value.trim().replace(/\s+/g, ' #');
+    const hashtags = document.getElementById('hashtags').value.trim();
     const text = `${title}\n\n${desc}\n\n${hashtags}`;
     navigator.clipboard.writeText(text).then(() => alert('English copied!'));
 }
@@ -179,15 +199,39 @@ function copyEnglish() {
     <pre style="white-space: pre-wrap; background: var(--bg); padding: 1rem; border-radius: 4px; max-height: 200px; overflow-y: auto;">{{ job.transcript or 'No transcript available' }}</pre>
 </div>
 
-{% if job.youtube_url %}
 <!-- YouTube -->
 <div class="card">
     <h3 class="mb-2">YouTube</h3>
+    {% if job.youtube_url %}
     <p style="margin-bottom: 0.5rem;">Video uploaded to YouTube (private):</p>
     <a href="{{ job.youtube_url }}" target="_blank" class="btn" style="background: #c4302b;">View on YouTube</a>
     <p class="text-muted text-small mt-2">Video ID: {{ job.youtube_video_id }}</p>
+    {% else %}
+    <p class="text-muted mb-2">Upload to YouTube after choosing your thumbnail</p>
+
+    <div style="margin-bottom: 1rem;">
+        <label>Which thumbnail?</label>
+        <select id="yt-thumbnail" style="width: auto; display: inline-block; margin-left: 0.5rem;">
+            <option value="fi">Finnish</option>
+            <option value="en">English</option>
+            <option value="clean">Clean (no text)</option>
+        </select>
+    </div>
+
+    <div style="margin-bottom: 1rem;">
+        <label>Which title/description?</label>
+        <select id="yt-language" style="width: auto; display: inline-block; margin-left: 0.5rem;">
+            <option value="fi">Finnish</option>
+            <option value="en">English</option>
+        </select>
+    </div>
+
+    <button class="btn" id="yt-upload-btn" onclick="uploadToYouTube()" style="background: #c4302b;">
+        Upload to YouTube (Private)
+    </button>
+    <p class="text-muted text-small mt-2">Will upload as private. You can change visibility on YouTube later.</p>
+    {% endif %}
 </div>
-{% endif %}
 
 <!-- Export -->
 <div class="card">
@@ -196,30 +240,139 @@ function copyEnglish() {
     <p class="text-muted text-small mt-2">Contains: video.mp4, thumbnail.jpg, captions.srt, metadata.json</p>
 </div>
 
-{% elif job.status in ['pending', 'transcribing', 'analyzing', 'rendering'] %}
+{% elif job.status == 'thumbnail_selection' %}
+
+<!-- Thumbnail Selection -->
+<div class="card">
+    <h3 class="mb-2">Choose Your Thumbnail</h3>
+    <p class="text-muted mb-2">Select the frame you want as your thumbnail, then continue processing.</p>
+
+    {% if job.thumbnail_candidates %}
+    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.5rem; margin-bottom: 1.5rem;">
+        {% for candidate in job.thumbnail_candidates %}
+        <div class="thumb-candidate {% if loop.index == 1 %}selected{% endif %}"
+             onclick="selectThumbnail({{ candidate.index }})"
+             data-index="{{ candidate.index }}"
+             style="cursor: pointer; border: 3px solid {% if loop.index == 1 %}var(--primary){% else %}transparent{% endif %}; border-radius: 4px; overflow: hidden;">
+            <img src="/api/jobs/{{ job.id }}/thumbnail/candidate/{{ candidate.index }}"
+                 alt="Option {{ candidate.index }}"
+                 style="width: 100%; aspect-ratio: 9/16; object-fit: cover; background: #000;">
+            <p class="text-muted text-small" style="text-align: center; padding: 2px 0;">#{{ candidate.index }}</p>
+        </div>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
+        <div>
+            <label for="thumb_text_fi">Finnish thumbnail text (optional)</label>
+            <textarea id="thumb_text_fi" rows="2" placeholder="e.g. LÄHTEEKÖ&#10;KÄYNTIIN?" style="resize: vertical;"></textarea>
+        </div>
+        <div>
+            <label for="thumb_text_en">English thumbnail text (optional)</label>
+            <textarea id="thumb_text_en" rows="2" placeholder="e.g. WILL IT&#10;START?" style="resize: vertical;"></textarea>
+        </div>
+    </div>
+    <p class="text-muted text-small mb-2">Leave empty to auto-generate text with AI based on content. Use Enter for line breaks.</p>
+
+    <button class="btn" onclick="continueProcessing()" id="continue-btn" style="width: 100%; padding: 1rem; font-size: 1.1rem;">
+        Continue Processing with Selected Thumbnail
+    </button>
+</div>
+
+<script>
+let selectedThumbIndex = 1;
+
+function selectThumbnail(index) {
+    selectedThumbIndex = index;
+    document.querySelectorAll('.thumb-candidate').forEach(el => {
+        el.style.borderColor = el.dataset.index == index ? 'var(--primary)' : 'transparent';
+    });
+}
+
+async function continueProcessing() {
+    const btn = document.getElementById('continue-btn');
+    btn.disabled = true;
+    btn.textContent = 'Starting...';
+
+    const textFi = document.getElementById('thumb_text_fi').value.trim();
+    const textEn = document.getElementById('thumb_text_en').value.trim();
+
+    try {
+        const resp = await fetch('/api/jobs/{{ job.id }}/continue', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                thumbnail_index: selectedThumbIndex,
+                text_fi: textFi || null,
+                text_en: textEn || null
+            })
+        });
+
+        if (resp.ok) {
+            location.reload();
+        } else {
+            const data = await resp.json();
+            alert('Failed: ' + (data.detail || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Continue Processing with Selected Thumbnail';
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = 'Continue Processing with Selected Thumbnail';
+    }
+}
+</script>
+
+{% elif job.status in ['pending', 'processing', 'transcribing', 'analyzing', 'rendering'] %}
 
 <!-- Processing Status -->
 <div class="card">
     <h3 class="mb-2">Processing...</h3>
-    <p class="text-muted">This page will auto-refresh when processing completes.</p>
+    <p class="text-muted" id="progress-step">{{ job.current_step }}</p>
     <div style="margin-top: 1rem;">
-        <div style="background: var(--border); height: 8px; border-radius: 4px; overflow: hidden;">
-            <div style="background: var(--primary); height: 100%; width:
-                {% if job.status == 'transcribing' %}25{% elif job.status == 'analyzing' %}50{% elif job.status == 'rendering' %}75{% else %}10{% endif %}%;
-                transition: width 0.5s;"></div>
+        <div style="background: var(--border); height: 12px; border-radius: 6px; overflow: hidden;">
+            <div id="progress-bar" style="background: var(--primary); height: 100%; width: 0%; transition: width 0.3s;"></div>
         </div>
+        <p class="text-muted text-small mt-2" id="progress-percent">0%</p>
     </div>
 </div>
 
 <script>
     const currentStatus = '{{ job.status }}';
-    setInterval(async () => {
-        const resp = await fetch('/api/jobs/{{ job.id }}');
-        const data = await resp.json();
-        if (data.status !== currentStatus) {
-            location.reload();
+    const progressBar = document.getElementById('progress-bar');
+    const progressPercent = document.getElementById('progress-percent');
+    const progressStep = document.getElementById('progress-step');
+
+    async function updateProgress() {
+        try {
+            const resp = await fetch('/api/jobs/{{ job.id }}/progress');
+            const data = await resp.json();
+
+            // Update progress bar
+            progressBar.style.width = data.percent + '%';
+            progressPercent.textContent = data.percent + '%';
+
+            // Update step text
+            if (data.step) {
+                progressStep.textContent = data.step;
+            } else if (data.current_step) {
+                progressStep.textContent = data.current_step;
+            }
+
+            // Reload page when status changes
+            if (data.status !== currentStatus) {
+                location.reload();
+            }
+        } catch (e) {
+            console.error('Progress update failed:', e);
         }
-    }, 3000);
+    }
+
+    // Poll every second for smoother updates
+    setInterval(updateProgress, 1000);
+    updateProgress(); // Initial call
 </script>
 
 {% endif %}
@@ -233,6 +386,41 @@ async function deleteJob() {
         window.location.href = '/jobs';
     } else {
         alert('Delete failed');
+    }
+}
+
+async function uploadToYouTube() {
+    const btn = document.getElementById('yt-upload-btn');
+    const thumbnail = document.getElementById('yt-thumbnail').value;
+    const language = document.getElementById('yt-language').value;
+
+    btn.disabled = true;
+    btn.textContent = 'Uploading...';
+
+    try {
+        const resp = await fetch('/api/jobs/{{ job.id }}/youtube', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                thumbnail: thumbnail,
+                language: language
+            })
+        });
+
+        const data = await resp.json();
+
+        if (resp.ok) {
+            alert('Uploaded! Video ID: ' + data.video_id);
+            location.reload();
+        } else {
+            alert('Upload failed: ' + (data.detail || data.error || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Upload to YouTube (Private)';
+        }
+    } catch (e) {
+        alert('Upload failed: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = 'Upload to YouTube (Private)';
     }
 }
 </script>

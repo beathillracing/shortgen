@@ -23,6 +23,24 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
     return job.to_dict()
 
 
+@router.get("/jobs/{job_id}/progress")
+def get_job_progress(job_id: str, db: Session = Depends(get_db)):
+    """Get real-time job progress."""
+    from app.services.progress import get_progress
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    progress = get_progress(job_id)
+    return {
+        "status": job.status,
+        "current_step": job.current_step,
+        "percent": progress["percent"],
+        "step": progress["step"]
+    }
+
+
 @router.get("/jobs")
 def list_jobs(db: Session = Depends(get_db), limit: int = 20):
     """List recent jobs."""
@@ -54,6 +72,46 @@ def update_job(
     return {"status": "updated"}
 
 
+@router.post("/jobs/{job_id}/continue")
+def continue_job(job_id: str, data: dict, db: Session = Depends(get_db)):
+    """Continue processing after thumbnail selection."""
+    from redis import Redis
+    from rq import Queue
+    from app.workers.transcribe import continue_processing
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    if job.status != "thumbnail_selection":
+        raise HTTPException(400, f"Job is not awaiting thumbnail selection (status: {job.status})")
+
+    # Get selected thumbnail index and optional custom text
+    selected_index = data.get("thumbnail_index", 1)
+    text_fi = data.get("text_fi")
+    text_en = data.get("text_en")
+
+    # Update job status
+    job.status = "processing"
+    job.current_step = "Continuing processing..."
+    job.selected_thumbnail_index = str(selected_index)
+    db.commit()
+
+    # Queue the continuation
+    redis_conn = Redis.from_url(settings.redis_url)
+    queue = Queue(connection=redis_conn)
+    queue.enqueue(
+        continue_processing,
+        job_id,
+        selected_index,
+        text_fi,
+        text_en,
+        job_timeout=1800
+    )
+
+    return {"status": "processing", "message": "Continuing with selected thumbnail"}
+
+
 @router.get("/jobs/{job_id}/export")
 def export_job(job_id: str, db: Session = Depends(get_db)):
     """Download export pack as ZIP."""
@@ -75,9 +133,13 @@ def export_job(job_id: str, db: Session = Depends(get_db)):
             if job.output_video_path and Path(job.output_video_path).exists():
                 zf.write(job.output_video_path, "video.mp4")
 
-            # Add thumbnail if exists
+            # Add all thumbnail variants
+            if job.thumbnail_path_fi and Path(job.thumbnail_path_fi).exists():
+                zf.write(job.thumbnail_path_fi, "thumbnail_fi.jpg")
+            if job.thumbnail_path_en and Path(job.thumbnail_path_en).exists():
+                zf.write(job.thumbnail_path_en, "thumbnail_en.jpg")
             if job.thumbnail_path and Path(job.thumbnail_path).exists():
-                zf.write(job.thumbnail_path, "thumbnail.jpg")
+                zf.write(job.thumbnail_path, "thumbnail_clean.jpg")
 
             # Add SRT
             if job.srt_content:
@@ -86,12 +148,15 @@ def export_job(job_id: str, db: Session = Depends(get_db)):
             # Add metadata JSON
             import json
             metadata = {
-                "title": job.final_title or job.suggested_title,
-                "description": job.final_description or job.suggested_description,
+                "title_fi": job.final_title or job.suggested_title_fi,
+                "title_en": job.suggested_title_en,
+                "description_fi": job.final_description or job.suggested_description_fi,
+                "description_en": job.suggested_description_en,
                 "hashtags": job.suggested_hashtags or [],
-                "hook": job.suggested_hook,
+                "hook_fi": job.suggested_hook_fi,
+                "hook_en": job.suggested_hook_en,
             }
-            zf.writestr("metadata.json", json.dumps(metadata, indent=2))
+            zf.writestr("metadata.json", json.dumps(metadata, indent=2, ensure_ascii=False))
 
     return FileResponse(
         zip_path,
@@ -155,19 +220,30 @@ def select_thumbnail(job_id: str, data: dict, db: Session = Depends(get_db)):
     # Regenerate thumbnails with text overlays using the selected candidate
     export_dir = settings.storage_path / "exports" / job_id
 
-    # Generate thumbnail text
-    thumb_text = claude.generate_thumbnail_text(
-        job.suggested_title_fi or "",
-        job.suggested_title_en or "",
-        job.context_description
-    )
+    # Use custom text if provided, otherwise generate with AI
+    custom_text_fi = data.get("text_fi")
+    custom_text_en = data.get("text_en")
+
+    if custom_text_fi and custom_text_en:
+        # Both provided - use custom text
+        text_fi = custom_text_fi
+        text_en = custom_text_en
+    else:
+        # Generate with AI
+        thumb_text = claude.generate_thumbnail_text(
+            job.suggested_title_fi or "",
+            job.suggested_title_en or "",
+            job.context_description
+        )
+        text_fi = custom_text_fi or thumb_text.get("text_fi", "KATSO")
+        text_en = custom_text_en or thumb_text.get("text_en", "WATCH")
 
     # Create new thumbnails from selected candidate
     thumb_paths = thumbnail.create_thumbnail_variants(
         candidate["path"],
         export_dir,
-        thumb_text.get("text_fi", "KATSO"),
-        thumb_text.get("text_en", "WATCH")
+        text_fi,
+        text_en
     )
 
     job.thumbnail_path = thumb_paths["clean"]
@@ -176,7 +252,7 @@ def select_thumbnail(job_id: str, data: dict, db: Session = Depends(get_db)):
 
     db.commit()
 
-    return {"status": "ok", "selected": index}
+    return {"status": "ok", "selected": index, "text_fi": text_fi, "text_en": text_en}
 
 
 @router.get("/jobs/{job_id}/thumbnail/{variant}")
@@ -231,3 +307,64 @@ def delete_job(job_id: str, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "deleted"}
+
+
+@router.post("/jobs/{job_id}/youtube")
+def upload_to_youtube(job_id: str, data: dict, db: Session = Depends(get_db)):
+    """Upload video to YouTube with selected thumbnail and language."""
+    from app.services import youtube
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    if job.status not in ["review", "completed"]:
+        raise HTTPException(400, "Job not ready for upload")
+
+    if job.youtube_url:
+        raise HTTPException(400, "Already uploaded to YouTube")
+
+    if not youtube.is_authenticated():
+        raise HTTPException(400, "YouTube not authenticated. Go to /api/youtube/auth")
+
+    # Get language preference
+    lang = data.get("language", "fi")
+    thumb_variant = data.get("thumbnail", "fi")
+
+    # Select title/description based on language
+    if lang == "en":
+        title = job.suggested_title_en or job.suggested_title_fi or "Video"
+        description = job.suggested_description_en or job.suggested_description_fi or ""
+    else:
+        title = job.suggested_title_fi or job.suggested_title_en or "Video"
+        description = job.suggested_description_fi or job.suggested_description_en or ""
+
+    # Select thumbnail
+    if thumb_variant == "en" and job.thumbnail_path_en:
+        thumbnail_path = job.thumbnail_path_en
+    elif thumb_variant == "fi" and job.thumbnail_path_fi:
+        thumbnail_path = job.thumbnail_path_fi
+    else:
+        thumbnail_path = job.thumbnail_path
+
+    # Upload to YouTube
+    result = youtube.upload_video(
+        video_path=job.output_video_path,
+        title=title,
+        description=description,
+        tags=job.suggested_hashtags or [],
+        privacy="private",
+        is_short=True,
+        thumbnail_path=thumbnail_path
+    )
+
+    # Save result
+    job.youtube_video_id = result["video_id"]
+    job.youtube_url = result["url"]
+    db.commit()
+
+    return {
+        "status": "uploaded",
+        "video_id": result["video_id"],
+        "url": result["url"]
+    }

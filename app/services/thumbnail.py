@@ -11,12 +11,12 @@ def add_text_to_thumbnail(
     position: str = "bottom"
 ) -> str:
     """
-    Add text overlay to a thumbnail image.
+    Add text overlay to a thumbnail image. Supports multiple lines.
 
     Args:
         input_path: Path to source image
         output_path: Path to save result
-        text: Text to overlay (should be short, 2-4 words)
+        text: Text to overlay (can contain newlines for multiple lines)
         position: "top", "center", or "bottom"
     """
     img = Image.open(input_path)
@@ -46,44 +46,85 @@ def add_text_to_thumbnail(
     except Exception:
         font = ImageFont.load_default()
 
-    # Get text bounding box
+    # Convert to uppercase and split into lines
     text = text.upper()
+    lines = text.split('\n')
 
-    # Reduce font size if text is too wide
-    bbox = draw.textbbox((0, 0), text, font=font)
-    text_width = bbox[2] - bbox[0]
-    while text_width > img.width * 0.9 and font_size > 20:
+    # Auto-wrap long lines that would exceed image width
+    max_text_width = img.width * 0.85  # Leave 15% margin
+    wrapped_lines = []
+    for line in lines:
+        words = line.split()
+        current_line = ""
+        for word in words:
+            test_line = f"{current_line} {word}".strip()
+            bbox = draw.textbbox((0, 0), test_line, font=font)
+            if bbox[2] - bbox[0] > max_text_width and current_line:
+                wrapped_lines.append(current_line)
+                current_line = word
+            else:
+                current_line = test_line
+        if current_line:
+            wrapped_lines.append(current_line)
+    lines = wrapped_lines if wrapped_lines else lines
+
+    # Find the widest line and reduce font size if still needed
+    def get_max_line_width():
+        return max(draw.textbbox((0, 0), line, font=font)[2] - draw.textbbox((0, 0), line, font=font)[0] for line in lines)
+
+    while get_max_line_width() > img.width * 0.85 and font_size > 20:
         font_size = int(font_size * 0.85)
         for fp in font_paths:
             if Path(fp).exists():
                 font = ImageFont.truetype(fp, font_size)
                 break
-        bbox = draw.textbbox((0, 0), text, font=font)
-        text_width = bbox[2] - bbox[0]
+        # Re-wrap with new font size
+        wrapped_lines = []
+        for line in text.split('\n'):
+            words = line.split()
+            current_line = ""
+            for word in words:
+                test_line = f"{current_line} {word}".strip()
+                bbox = draw.textbbox((0, 0), test_line, font=font)
+                if bbox[2] - bbox[0] > max_text_width and current_line:
+                    wrapped_lines.append(current_line)
+                    current_line = word
+                else:
+                    current_line = test_line
+            if current_line:
+                wrapped_lines.append(current_line)
+        lines = wrapped_lines if wrapped_lines else lines
 
-    text_height = bbox[3] - bbox[1]
+    # Calculate total text block height
+    line_height = int(font_size * 1.2)
+    total_height = line_height * len(lines)
 
-    # Calculate position
-    x = (img.width - text_width) // 2
-
+    # Calculate starting Y position
     if position == "top":
-        y = int(img.height * 0.1)
+        start_y = int(img.height * 0.1)
     elif position == "center":
-        y = (img.height - text_height) // 2
+        start_y = (img.height - total_height) // 2
     else:  # bottom
-        y = int(img.height * 0.85) - text_height  # Position near bottom
+        start_y = int(img.height * 0.85) - total_height
 
     # Draw thick black outline for clickbait look
     outline_size = max(3, font_size // 12)
 
-    # Draw black outline (multiple passes for thickness)
-    for dx in range(-outline_size, outline_size + 1):
-        for dy in range(-outline_size, outline_size + 1):
-            if dx != 0 or dy != 0:
-                draw.text((x + dx, y + dy), text, font=font, fill=(0, 0, 0))
+    # Draw each line centered
+    for i, line in enumerate(lines):
+        bbox = draw.textbbox((0, 0), line, font=font)
+        line_width = bbox[2] - bbox[0]
+        x = (img.width - line_width) // 2
+        y = start_y + (i * line_height)
 
-    # Draw green text (brand color)
-    draw.text((x, y), text, font=font, fill=(76, 175, 80))  # Green (#4CAF50)
+        # Draw black outline (multiple passes for thickness)
+        for dx in range(-outline_size, outline_size + 1):
+            for dy in range(-outline_size, outline_size + 1):
+                if dx != 0 or dy != 0:
+                    draw.text((x + dx, y + dy), line, font=font, fill=(0, 0, 0))
+
+        # Draw green text (brand color)
+        draw.text((x, y), line, font=font, fill=(76, 175, 80))  # Green (#4CAF50)
 
     # Save
     img.save(output_path, quality=95)

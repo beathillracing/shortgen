@@ -61,7 +61,7 @@ Please analyze the content and provide:
 
 3. DESCRIPTION: A brief description for social media (2-3 sentences max)
 
-4. HASHTAGS: 5-10 relevant hashtags
+4. HASHTAGS: Exactly 5 relevant hashtags (without the # symbol, just the words)
 
 5. HOOK: The opening hook/first line that grabs attention
 
@@ -113,6 +113,17 @@ Only respond with valid JSON, no other text."""
             "hook": "",
             "parse_error": response_text
         }
+
+    # Clean up hashtags: remove # prefix if present, limit to 5
+    if "hashtags" in result and result["hashtags"]:
+        cleaned = []
+        for tag in result["hashtags"]:
+            if isinstance(tag, str):
+                # Remove # prefix and any whitespace
+                clean_tag = tag.lstrip('#').strip()
+                if clean_tag:
+                    cleaned.append(clean_tag)
+        result["hashtags"] = cleaned[:5]  # Limit to 5
 
     return result
 

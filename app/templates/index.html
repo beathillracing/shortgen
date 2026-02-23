@@ -23,7 +23,9 @@
         </div>
 
         <div id="file-info" style="display: none;" class="mb-2">
-            <p>Selected: <span id="file-name"></span></p>
+            <p id="file-count"></p>
+            <div id="file-list" style="margin-top: 0.5rem;"></div>
+            <p class="text-muted text-small" id="reorder-hint" style="display: none;">Drag to reorder. Videos will be stitched in this order.</p>
         </div>
 
         <label for="context">What's this video about? (helps AI understand context)</label>
@@ -36,29 +38,35 @@
             </label>
         </div>
 
-        <div style="margin-bottom: 1rem;">
-            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-                <input type="checkbox" id="burn-captions" name="burn_captions" style="width: auto;">
-                <span>Burn captions into video (leave off if using CapCut)</span>
-            </label>
-        </div>
-
         <div style="margin-bottom: 1rem; padding: 1rem; background: var(--bg-secondary); border-radius: 8px;">
             <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
-                <input type="checkbox" id="precaptioned" name="precaptioned" style="width: auto;">
-                <span><strong>Pre-captioned video</strong> (from CapCut or other editor)</span>
+                <input type="checkbox" id="burn-captions" name="burn_captions" style="width: auto;" checked>
+                <span><strong>Karaoke captions</strong> (green word-by-word highlighting)</span>
             </label>
             <p class="text-muted text-small" style="margin-left: 1.5rem; margin-top: 0.5rem;">
-                Video already has captions burned in. Will remove CapCut watermark/outro, add your watermark, and generate titles/tags.
+                Uses Whisper large-v3 for accurate Finnish transcription. Words highlight as they're spoken.
             </p>
-            <div id="precaptioned-options" style="display: none; margin-left: 1.5rem; margin-top: 0.5rem;">
-                <label style="display: flex; align-items: center; gap: 0.5rem;">
-                    <span>Trim from end (CapCut outro):</span>
-                    <input type="number" id="remove-outro-seconds" name="remove_outro_seconds" value="3" min="0" max="10" step="0.5" style="width: 60px;">
-                    <span>seconds</span>
-                </label>
-            </div>
         </div>
+
+        <details style="margin-bottom: 1rem;">
+            <summary class="text-muted" style="cursor: pointer;">Already have captions from CapCut?</summary>
+            <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 8px; margin-top: 0.5rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                    <input type="checkbox" id="precaptioned" name="precaptioned" style="width: auto;">
+                    <span><strong>Pre-captioned video</strong></span>
+                </label>
+                <p class="text-muted text-small" style="margin-left: 1.5rem; margin-top: 0.5rem;">
+                    Skip caption generation. Will just remove CapCut watermark/outro and add yours.
+                </p>
+                <div id="precaptioned-options" style="display: none; margin-left: 1.5rem; margin-top: 0.5rem;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span>Trim from end:</span>
+                        <input type="number" id="remove-outro-seconds" name="remove_outro_seconds" value="3" min="0" max="10" step="0.5" style="width: 60px;">
+                        <span>seconds</span>
+                    </label>
+                </div>
+            </div>
+        </details>
 
         <div style="margin-bottom: 1rem;">
             <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
@@ -116,22 +124,87 @@
 
     fileInput.addEventListener('change', handleFileSelect);
 
+    // Store files in array so we can reorder
+    let selectedFiles = [];
+
     function handleFileSelect() {
         if (fileInput.files.length) {
-            const names = Array.from(fileInput.files).map(f => f.name).join(', ');
-            fileName.textContent = fileInput.files.length > 1
-                ? `${fileInput.files.length} files: ${names}`
-                : names;
+            selectedFiles = Array.from(fileInput.files);
+            renderFileList();
             fileInfo.style.display = 'block';
             submitBtn.disabled = false;
         }
+    }
+
+    function renderFileList() {
+        const fileList = document.getElementById('file-list');
+        const fileCount = document.getElementById('file-count');
+        const reorderHint = document.getElementById('reorder-hint');
+
+        fileCount.textContent = selectedFiles.length > 1
+            ? `${selectedFiles.length} files selected:`
+            : `1 file selected:`;
+
+        reorderHint.style.display = selectedFiles.length > 1 ? 'block' : 'none';
+
+        fileList.innerHTML = selectedFiles.map((file, index) => `
+            <div class="file-item" draggable="true" data-index="${index}"
+                 style="padding: 0.5rem; background: var(--bg-secondary); margin-bottom: 0.25rem; border-radius: 4px; cursor: ${selectedFiles.length > 1 ? 'grab' : 'default'}; display: flex; align-items: center; gap: 0.5rem;">
+                ${selectedFiles.length > 1 ? `<span style="color: var(--primary);">☰</span>` : ''}
+                <span>${index + 1}. ${file.name}</span>
+                <span class="text-muted text-small">(${(file.size / 1024 / 1024).toFixed(1)} MB)</span>
+            </div>
+        `).join('');
+
+        // Add drag handlers if multiple files
+        if (selectedFiles.length > 1) {
+            const items = fileList.querySelectorAll('.file-item');
+            items.forEach(item => {
+                item.addEventListener('dragstart', handleDragStart);
+                item.addEventListener('dragover', handleDragOver);
+                item.addEventListener('drop', handleDrop);
+                item.addEventListener('dragend', handleDragEnd);
+            });
+        }
+    }
+
+    let draggedIndex = null;
+
+    function handleDragStart(e) {
+        draggedIndex = parseInt(e.target.dataset.index);
+        e.target.style.opacity = '0.5';
+    }
+
+    function handleDragOver(e) {
+        e.preventDefault();
+        e.target.closest('.file-item').style.borderTop = '2px solid var(--primary)';
+    }
+
+    function handleDrop(e) {
+        e.preventDefault();
+        const targetIndex = parseInt(e.target.closest('.file-item').dataset.index);
+        if (draggedIndex !== null && draggedIndex !== targetIndex) {
+            // Reorder array
+            const [draggedFile] = selectedFiles.splice(draggedIndex, 1);
+            selectedFiles.splice(targetIndex, 0, draggedFile);
+            renderFileList();
+        }
+    }
+
+    function handleDragEnd(e) {
+        document.querySelectorAll('.file-item').forEach(item => {
+            item.style.opacity = '1';
+            item.style.borderTop = 'none';
+        });
+        draggedIndex = null;
     }
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
 
         const formData = new FormData();
-        for (const file of fileInput.files) {
+        // Use our ordered array instead of fileInput.files
+        for (const file of selectedFiles) {
             formData.append('files', file);
         }
         formData.append('context', document.getElementById('context').value);
