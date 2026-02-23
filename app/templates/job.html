@@ -4,13 +4,19 @@
 
 {% block content %}
 <div class="card">
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <div>
-            <h2>{{ job.original_filename or 'Untitled' }}</h2>
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; gap: 1rem; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+            <h2 style="word-break: break-word;">{{ job.original_filename or 'Untitled' }}</h2>
             <p class="text-muted text-small">{{ job.id }}</p>
         </div>
-        <div style="display: flex; gap: 0.5rem; align-items: center;">
-            <span class="status status-{{ job.status }}">{{ job.status }}</span>
+        <div style="display: flex; gap: 0.5rem; align-items: center; flex-shrink: 0;">
+            <select id="status-select" onchange="updateStatus(this.value)" class="status-dropdown status-{{ job.status }}" style="min-width: 100px;">
+                <option value="review" {% if job.status == 'review' %}selected{% endif %}>review</option>
+                <option value="uploaded" {% if job.status == 'uploaded' %}selected{% endif %}>uploaded</option>
+                <option value="posted" {% if job.status == 'posted' %}selected{% endif %}>posted</option>
+                <option value="completed" {% if job.status == 'completed' %}selected{% endif %}>completed</option>
+                <option value="archived" {% if job.status == 'archived' %}selected{% endif %}>archived</option>
+            </select>
             <button class="btn btn-secondary" onclick="deleteJob()" style="padding: 0.5rem 1rem; background: #c62828;">Delete</button>
         </div>
     </div>
@@ -386,6 +392,28 @@ async function deleteJob() {
         window.location.href = '/jobs';
     } else {
         alert('Delete failed');
+    }
+}
+
+async function updateStatus(newStatus) {
+    try {
+        const resp = await fetch('/api/jobs/{{ job.id }}/status', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ status: newStatus })
+        });
+        if (resp.ok) {
+            // Update dropdown styling
+            const select = document.getElementById('status-select');
+            select.className = 'status-dropdown status-' + newStatus;
+        } else {
+            const data = await resp.json();
+            alert('Failed to update status: ' + (data.detail || 'Unknown error'));
+            location.reload();
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+        location.reload();
     }
 }
 

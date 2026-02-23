@@ -41,7 +41,17 @@
                     <span class="text-muted text-small">{{ job.id[:8] }}...</span>
                 </td>
                 <td style="padding: 0.75rem;">
+                    {% if job.status in ['review', 'uploaded', 'posted', 'completed', 'archived'] %}
+                    <select onchange="updateJobStatus('{{ job.id }}', this.value, this)" class="status-dropdown status-{{ job.status }}" style="min-width: 110px;">
+                        <option value="review" {% if job.status == 'review' %}selected{% endif %}>review</option>
+                        <option value="uploaded" {% if job.status == 'uploaded' %}selected{% endif %}>uploaded</option>
+                        <option value="posted" {% if job.status == 'posted' %}selected{% endif %}>posted</option>
+                        <option value="completed" {% if job.status == 'completed' %}selected{% endif %}>completed</option>
+                        <option value="archived" {% if job.status == 'archived' %}selected{% endif %}>archived</option>
+                    </select>
+                    {% else %}
                     <span class="status status-{{ job.status }}">{{ job.status }}</span>
+                    {% endif %}
                     {% if job.current_step %}
                     <br>
                     <span class="text-muted text-small">{{ job.current_step }}</span>
@@ -93,6 +103,27 @@ async function deleteJob(jobId) {
         }
     } catch (err) {
         alert('Failed to delete: ' + err.message);
+    }
+}
+
+async function updateJobStatus(jobId, newStatus, selectEl) {
+    try {
+        const response = await fetch(`/api/jobs/${jobId}/status`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ status: newStatus })
+        });
+        if (response.ok) {
+            // Update dropdown styling
+            selectEl.className = 'status-dropdown status-' + newStatus;
+        } else {
+            const data = await response.json();
+            alert('Failed to update: ' + (data.detail || 'Unknown error'));
+            location.reload();
+        }
+    } catch (err) {
+        alert('Failed to update: ' + err.message);
+        location.reload();
     }
 }
 </script>

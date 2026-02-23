@@ -113,8 +113,32 @@
         .status-pending { background: #333; }
         .status-transcribing, .status-analyzing, .status-rendering { background: #1565c0; }
         .status-review { background: #ff9800; }
+        .status-uploaded { background: #9c27b0; }
+        .status-posted { background: #00bcd4; }
         .status-completed { background: var(--primary); }
+        .status-archived { background: #607d8b; }
         .status-failed { background: #c62828; }
+
+        .status-dropdown {
+            padding: 0.3rem 0.6rem;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            font-size: 0.8rem;
+            font-weight: bold;
+            cursor: pointer;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='white' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10l-5 5z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.4rem center;
+            padding-right: 1.5rem;
+        }
+        .status-dropdown.status-review { background-color: #ff9800; }
+        .status-dropdown.status-uploaded { background-color: #9c27b0; }
+        .status-dropdown.status-posted { background-color: #00bcd4; }
+        .status-dropdown.status-completed { background-color: var(--primary); }
+        .status-dropdown.status-archived { background-color: #607d8b; }
 
         .grid {
             display: grid;

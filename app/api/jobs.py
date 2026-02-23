@@ -72,6 +72,25 @@ def update_job(
     return {"status": "updated"}
 
 
+@router.post("/jobs/{job_id}/status")
+def update_job_status(job_id: str, data: dict, db: Session = Depends(get_db)):
+    """Manually update job status for tracking."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    new_status = data.get("status")
+    allowed_statuses = ["review", "uploaded", "posted", "archived", "completed"]
+
+    if new_status not in allowed_statuses:
+        raise HTTPException(400, f"Invalid status. Allowed: {', '.join(allowed_statuses)}")
+
+    job.status = new_status
+    db.commit()
+
+    return {"status": "updated", "new_status": new_status}
+
+
 @router.post("/jobs/{job_id}/continue")
 def continue_job(job_id: str, data: dict, db: Session = Depends(get_db)):
     """Continue processing after thumbnail selection."""
