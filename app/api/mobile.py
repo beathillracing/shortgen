@@ -394,6 +394,37 @@ def update_mobile_job(
     return _job_payload(job, include_detail=True)
 
 
+@router.delete("/jobs/{job_id}")
+def delete_mobile_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    identity: dict = Depends(_mobile_identity),
+):
+    job = _job_or_404(job_id, db, identity)
+    paths = [
+        job.upload_path,
+        job.output_video_path,
+        job.thumbnail_path,
+        job.thumbnail_path_fi,
+        job.thumbnail_path_en,
+    ]
+    if job.upload_paths:
+        try:
+            paths.extend(json.loads(job.upload_paths))
+        except (TypeError, json.JSONDecodeError):
+            pass
+    for candidate in (job.thumbnail_candidates or []):
+        candidate_path = candidate.get("path")
+        if candidate_path:
+            paths.append(candidate_path)
+    for path in paths:
+        if path:
+            Path(path).unlink(missing_ok=True)
+    db.delete(job)
+    db.commit()
+    return {"status": "deleted"}
+
+
 @router.post("/jobs/{job_id}/continue")
 def continue_mobile_job(
     job_id: str,
@@ -530,11 +561,24 @@ def get_mobile_thumbnail(
 @router.post("/uploads")
 def create_upload_session(
     data: dict,
+    db: Session = Depends(get_db),
     identity: dict = Depends(_mobile_identity),
 ):
     files = data.get("files") or []
     if not isinstance(files, list) or not 1 <= len(files) <= MAX_FILES:
         raise HTTPException(400, f"files must contain between 1 and {MAX_FILES} items")
+
+    # Fail fast before the client uploads anything: reject over-quota free
+    # accounts now instead of after the full transfer at /complete.
+    if identity.get("access_id"):
+        ent = entitlement(db, identity["owner"])
+        remaining = ent["usage"]["jobs_remaining"]
+        if remaining is not None and remaining <= 0:
+            raise HTTPException(
+                402,
+                "Monthly free processing limit reached. "
+                "Upgrade to Beathill Studio Pro for unlimited videos.",
+            )
 
     normalized_files = []
     for index, item in enumerate(files):

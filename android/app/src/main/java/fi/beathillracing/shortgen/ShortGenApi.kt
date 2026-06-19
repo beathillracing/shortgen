@@ -153,6 +153,10 @@ class ShortGenApi(
         requestJson("DELETE", "/api/mobile/account")
     }
 
+    suspend fun deleteJob(jobId: String) = withContext(Dispatchers.IO) {
+        requestJson("DELETE", "/api/mobile/jobs/$jobId")
+    }
+
     suspend fun updateMetadata(jobId: String, title: String, description: String) =
         withContext(Dispatchers.IO) {
             requestJson(

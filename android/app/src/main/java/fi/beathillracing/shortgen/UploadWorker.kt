@@ -96,6 +96,8 @@ class UploadWorker(
                     .putString(KEY_JOB_URL, "$baseUrl/job/$jobId")
                     .build(),
             )
+        } catch (terminal: TerminalUploadException) {
+            Result.failure(errorData(terminal.message ?: "Upload failed"))
         } catch (error: Exception) {
             if (runAttemptCount < MAX_RETRIES) {
                 Result.retry()
@@ -206,12 +208,28 @@ class UploadWorker(
         client.newCall(request).execute().use { response ->
             val text = response.body?.string().orEmpty()
             if (!response.isSuccessful) {
-                if (response.code in 500..599) throw IOException("Server error ${response.code}")
-                throw IllegalStateException("Request failed ${response.code}: $text")
+                // 409 (offset resync / transient conflict) and 5xx are retryable;
+                // other 4xx are terminal and surfaced with the server message.
+                if (response.code == 409 || response.code in 500..599) {
+                    throw IOException("Retryable server response ${response.code}")
+                }
+                throw TerminalUploadException(
+                    extractDetail(text) ?: "Request failed ${response.code}",
+                )
             }
             return JSONObject(text)
         }
     }
+
+    private fun extractDetail(text: String): String? = runCatching {
+        when (val detail = JSONObject(text).opt("detail")) {
+            is String -> detail
+            is JSONObject -> detail.optString("message").ifBlank { detail.toString() }
+            else -> null
+        }
+    }.getOrNull()?.takeIf { it.isNotBlank() }
+
+    private class TerminalUploadException(message: String) : Exception(message)
 
     private fun createForegroundInfo(progress: Int, text: String): ForegroundInfo {
         val manager = applicationContext.getSystemService(NotificationManager::class.java)

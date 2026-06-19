@@ -39,7 +39,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.VideoLibrary
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
@@ -239,9 +241,11 @@ fun JobsScreen(
     onOpenJob: (String) -> Unit,
     onOpenSettings: () -> Unit,
 ) {
+    val scope = rememberCoroutineScope()
     var jobs by remember { mutableStateOf<List<JobSummary>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshKey by remember { mutableStateOf(0) }
+    var pendingDelete by remember { mutableStateOf<JobSummary?>(null) }
 
     LaunchedEffect(api, refreshKey) {
         if (api == null) return@LaunchedEffect
@@ -282,39 +286,76 @@ fun JobsScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(jobs, key = { it.id }) { job ->
-                    JobRow(job = job, onClick = { onOpenJob(job.id) })
+                    JobRow(
+                        job = job,
+                        onClick = { onOpenJob(job.id) },
+                        onDelete = { pendingDelete = job },
+                    )
                 }
             }
         }
     }
+
+    pendingDelete?.let { target ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete job?") },
+            text = { Text("This permanently deletes ${target.filename} and its files.") },
+            confirmButton = {
+                Button(onClick = {
+                    pendingDelete = null
+                    scope.launch {
+                        runCatching { api?.deleteJob(target.id) }
+                            .onSuccess { refreshKey += 1 }
+                            .onFailure { error = it.message }
+                    }
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+            },
+        )
+    }
 }
 
 @Composable
-private fun JobRow(job: JobSummary, onClick: () -> Unit) {
-    Column(
+private fun JobRow(job: JobSummary, onClick: () -> Unit, onDelete: () -> Unit) {
+    Row(
         modifier = Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
             .clickable(onClick = onClick)
-            .padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+            .padding(start = 14.dp, top = 14.dp, bottom = 14.dp, end = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(job.filename, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            Text(job.status.replace("_", " "), color = statusColor(job.status))
-            Text(formatDate(job.createdAt), style = MaterialTheme.typography.bodySmall)
-        }
-        if (job.status !in setOf("review", "completed", "failed")) {
-            LinearProgressIndicator(
-                progress = { job.progress / 100f },
+            Text(job.filename, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-            )
-            Text(job.currentStep.orEmpty(), style = MaterialTheme.typography.bodySmall)
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(job.status.replace("_", " "), color = statusColor(job.status))
+                Text(formatDate(job.createdAt), style = MaterialTheme.typography.bodySmall)
+            }
+            if (job.status !in setOf("review", "completed", "failed")) {
+                LinearProgressIndicator(
+                    progress = { job.progress / 100f },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(job.currentStep.orEmpty(), style = MaterialTheme.typography.bodySmall)
+            }
+            job.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
-        job.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        IconButton(onClick = onDelete) {
+            Icon(
+                Icons.Outlined.Delete,
+                contentDescription = "Delete job",
+                tint = MaterialTheme.colorScheme.error,
+            )
+        }
     }
 }
 
