@@ -36,6 +36,7 @@ import com.android.billingclient.api.BillingFlowParams
 import com.android.billingclient.api.BillingResult
 import com.android.billingclient.api.PendingPurchasesParams
 import com.android.billingclient.api.ProductDetails
+import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -71,10 +72,21 @@ fun DistributionAccountSection(
         }
     }
 
-    fun verifyPurchase(purchaseToken: String) {
+    fun verifyPurchase(purchase: Purchase) {
         scope.launch {
-            runCatching { api.verifySubscription(purchaseToken) }
-                .onSuccess { account = it; error = null }
+            runCatching { api.verifySubscription(purchase.purchaseToken) }
+                .onSuccess { status ->
+                    account = status
+                    error = null
+                    // Acknowledge only after the server confirms the purchase, so a
+                    // failed verification leaves Google's auto-refund window intact.
+                    if (!purchase.isAcknowledged) {
+                        val params = AcknowledgePurchaseParams.newBuilder()
+                            .setPurchaseToken(purchase.purchaseToken)
+                            .build()
+                        billingClientPlaceholder?.acknowledgePurchase(params) {}
+                    }
+                }
                 .onFailure { error = it.message }
         }
     }
@@ -83,15 +95,7 @@ fun DistributionAccountSection(
         BillingClient.newBuilder(context)
             .setListener { result, purchases ->
                 if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                    purchases.orEmpty().forEach { purchase ->
-                        if (!purchase.isAcknowledged) {
-                            val params = AcknowledgePurchaseParams.newBuilder()
-                                .setPurchaseToken(purchase.purchaseToken)
-                                .build()
-                            billingClientPlaceholder?.acknowledgePurchase(params) {}
-                        }
-                        verifyPurchase(purchase.purchaseToken)
-                    }
+                    purchases.orEmpty().forEach { purchase -> verifyPurchase(purchase) }
                 }
             }
             .enablePendingPurchases(
@@ -124,7 +128,7 @@ fun DistributionAccountSection(
                         .build(),
                 ) { result, purchases ->
                     if (result.responseCode == BillingClient.BillingResponseCode.OK) {
-                        purchases.forEach { verifyPurchase(it.purchaseToken) }
+                        purchases.forEach { purchase -> verifyPurchase(purchase) }
                     }
                 }
             }

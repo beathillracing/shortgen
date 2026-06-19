@@ -374,12 +374,21 @@ fun JobDetailScreen(
 
     LaunchedEffect(jobId, refreshKey) {
         while (true) {
-            runCatching { api.getJob(jobId) }
+            val current = runCatching { api.getJob(jobId) }
                 .onSuccess {
                     job = it
                     error = null
                 }
                 .onFailure { error = it.message }
+                .getOrNull()
+            val status = current?.summary?.status
+            val publishState = current?.publishStatus?.optString("status", "idle") ?: "idle"
+            val publishing = publishState == "queued" || publishState == "running"
+            // Stop the 3s poll once the job is settled; user actions bump refreshKey
+            // to restart it, and active publishing keeps it alive.
+            val settled = status == "failed" ||
+                ((status == "review" || status == "completed") && !publishing)
+            if (settled) break
             delay(3000)
         }
     }
