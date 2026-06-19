@@ -26,15 +26,36 @@ from app.services.mobile_accounts import (
     verify_subscription,
 )
 from app.database import SessionLocal
+from redis import Redis
 
 router = APIRouter()
+
+_register_rate_redis = Redis.from_url(settings.redis_url)
+REGISTER_RATE_LIMIT = 10  # registrations per IP per hour
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 MAX_FILES = 20
 
 
 @router.post("/register")
-def register_mobile_installation(data: dict, db: Session = Depends(get_db)):
+def register_mobile_installation(
+    data: dict,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    forwarded = request.headers.get("x-forwarded-for", "")
+    client_ip = forwarded.split(",")[0].strip() or (
+        request.client.host if request.client else "unknown"
+    )
+    rate_key = f"mobile_register_rl:{client_ip}"
+    try:
+        attempts = _register_rate_redis.incr(rate_key)
+        if attempts == 1:
+            _register_rate_redis.expire(rate_key, 3600)
+    except Exception:
+        attempts = 0  # fail open if Redis is unavailable
+    if attempts > REGISTER_RATE_LIMIT:
+        raise HTTPException(429, "Too many registration attempts. Try again later.")
     installation_id = str(data.get("installation_id") or "").strip()
     token = str(data.get("access_token") or "").strip()
     if not 16 <= len(installation_id) <= 64:

@@ -109,6 +109,12 @@ fun UploadScreen(
         .getWorkInfosForUniqueWorkFlow(WORK_NAME)
         .collectAsState(initial = emptyList())
     val currentWork = workInfos.firstOrNull()
+    val account by produceState<AccountStatus?>(initialValue = null, server, token) {
+        if (token.isBlank() || !server.startsWith("https://")) return@produceState
+        value = runCatching {
+            ShortGenApi(server.trimEnd('/'), token).getAccount()
+        }.getOrNull()
+    }
     var contextText by remember { mutableStateOf("") }
     var selectedUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var minimalCuts by remember { mutableStateOf(false) }
@@ -179,6 +185,16 @@ fun UploadScreen(
             }
         }
 
+        account?.let { acct ->
+            acct.usage.limit?.let { limit ->
+                Text(
+                    "${acct.usage.remaining ?: 0} of $limit free jobs left this month",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
         Button(
             onClick = {
                 if (
@@ -225,6 +241,14 @@ fun UploadScreen(
         }
 
         WorkStatus(currentWork)
+        if (currentWork?.state == WorkInfo.State.RUNNING ||
+            currentWork?.state == WorkInfo.State.ENQUEUED
+        ) {
+            OutlinedButton(
+                onClick = { workManager.cancelUniqueWork(WORK_NAME) },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Cancel upload") }
+        }
         val jobId = currentWork?.outputData?.getString(UploadWorker.KEY_JOB_ID)
         if (currentWork?.state == WorkInfo.State.SUCCEEDED && jobId != null) {
             Button(onClick = { onOpenJob(jobId) }, modifier = Modifier.fillMaxWidth()) {
@@ -520,12 +544,12 @@ private fun ReviewAndPublish(
     onAction: (suspend () -> Unit) -> Unit,
 ) {
     var language by remember { mutableStateOf("fi") }
-    var title by remember(job.summary.id, language) {
-        mutableStateOf(if (language == "fi") job.titleFi else job.titleEn)
-    }
-    var description by remember(job.summary.id, language) {
-        mutableStateOf(if (language == "fi") job.descriptionFi else job.descriptionEn)
-    }
+    var titleFi by remember(job.summary.id) { mutableStateOf(job.titleFi) }
+    var titleEn by remember(job.summary.id) { mutableStateOf(job.titleEn) }
+    var descriptionFi by remember(job.summary.id) { mutableStateOf(job.descriptionFi) }
+    var descriptionEn by remember(job.summary.id) { mutableStateOf(job.descriptionEn) }
+    val title = if (language == "fi") titleFi else titleEn
+    val description = if (language == "fi") descriptionFi else descriptionEn
     var thumbnail by remember { mutableStateOf("fi") }
     var contentType by remember { mutableStateOf("short") }
     var youtube by remember(job.posted.youtube) { mutableStateOf(false) }
@@ -543,32 +567,24 @@ private fun ReviewAndPublish(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(
             selected = language == "fi",
-            onClick = {
-                language = "fi"
-                title = job.titleFi
-                description = job.descriptionFi
-            },
+            onClick = { language = "fi" },
             label = { Text("Finnish") },
         )
         FilterChip(
             selected = language == "en",
-            onClick = {
-                language = "en"
-                title = job.titleEn
-                description = job.descriptionEn
-            },
+            onClick = { language = "en" },
             label = { Text("English") },
         )
     }
     OutlinedTextField(
         value = title,
-        onValueChange = { title = it },
+        onValueChange = { if (language == "fi") titleFi = it else titleEn = it },
         label = { Text("Title") },
         modifier = Modifier.fillMaxWidth(),
     )
     OutlinedTextField(
         value = description,
-        onValueChange = { description = it },
+        onValueChange = { if (language == "fi") descriptionFi = it else descriptionEn = it },
         label = { Text("Description") },
         minLines = 4,
         modifier = Modifier.fillMaxWidth(),
@@ -645,6 +661,13 @@ private fun ReviewAndPublish(
         selected = contentType,
         onSelected = { contentType = it },
     )
+    if (youtube && contentType == "short") {
+        Text(
+            "YouTube can't set a Shorts thumbnail via API - set it in YouTube Studio after upload.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 
     val selectedPlatforms = buildList {
         if (youtube) add("youtube")
