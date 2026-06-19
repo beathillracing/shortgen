@@ -305,6 +305,13 @@ fun JobsScreen(
             error != null && jobs.isEmpty() -> {
                 Text(error.orEmpty(), color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp))
             }
+            jobs.isEmpty() -> {
+                Text(
+                    "No videos yet. Upload one to get started.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(16.dp),
+                )
+            }
             else -> LazyColumn(
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
