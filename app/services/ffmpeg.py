@@ -278,6 +278,8 @@ def render_video_with_captions_and_outro(
     job_id: Optional[str] = None,
     thumbnail_path: Optional[str] = None,
     thumbnail_duration: float = 0.3,
+    progress_base: Optional[int] = None,
+    progress_ceiling: int = 99,
 ) -> str:
     """
     Render video with captions, watermark, and outro - ALL IN ONE ENCODE.
@@ -455,7 +457,10 @@ def render_video_with_captions_and_outro(
     # Use progress tracking if job_id provided
     if job_id:
         from app.services.progress import run_ffmpeg_with_progress
-        result = run_ffmpeg_with_progress(cmd, job_id, total_duration, "Rendering video")
+        result = run_ffmpeg_with_progress(
+            cmd, job_id, total_duration,
+            base_percent=progress_base, ceiling_percent=progress_ceiling,
+        )
     else:
         result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -534,6 +539,8 @@ def remove_capcut_watermark(
     job_id: Optional[str] = None,
     duration: Optional[float] = None,
     append_outro: bool = True,
+    progress_base: Optional[int] = None,
+    progress_ceiling: int = 99,
 ) -> str:
     """
     Remove CapCut watermark, add custom watermark, and append outro - ALL IN ONE ENCODE.
@@ -664,7 +671,10 @@ def remove_capcut_watermark(
     # Use progress tracking if job_id provided
     if job_id:
         from app.services.progress import run_ffmpeg_with_progress
-        result = run_ffmpeg_with_progress(cmd, job_id, total_duration, "Rendering video")
+        result = run_ffmpeg_with_progress(
+            cmd, job_id, total_duration,
+            base_percent=progress_base, ceiling_percent=progress_ceiling,
+        )
     else:
         result = subprocess.run(cmd, capture_output=True, text=True)
 

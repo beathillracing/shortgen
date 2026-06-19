@@ -369,7 +369,10 @@ private fun JobRow(job: JobSummary, onClick: () -> Unit, onDelete: () -> Unit) {
                     progress = { job.progress / 100f },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(job.currentStep.orEmpty(), style = MaterialTheme.typography.bodySmall)
+                Text(
+                    "${job.currentStep.orEmpty().ifBlank { "Processing" }}  ${job.progress}%",
+                    style = MaterialTheme.typography.bodySmall,
+                )
             }
             job.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
@@ -499,7 +502,9 @@ private fun JobContent(
                     progress = { job.summary.progress / 100f },
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Text(job.summary.currentStep ?: "Processing")
+                Text(
+                    "${job.summary.currentStep?.takeIf { it.isNotBlank() } ?: "Processing"}  ${job.summary.progress}%",
+                )
             }
         }
     }

@@ -24,7 +24,7 @@ def analyze_and_prepare_video(db, job: Job, input_video: str, cut_video_path: st
     audio_path = str(storage.get_processing_path(str(job.id), "audio.mp3"))
     ffmpeg.extract_audio(input_video, audio_path)
 
-    update_job_status(db, job, "transcribing", "Transcribing with Whisper large-v3...", 30)
+    update_job_status(db, job, "transcribing", "Transcribing audio...", 30)
     transcription = whisper.transcribe_audio(audio_path)
     job.transcript = transcription["transcript"]
     job.srt_content = whisper.split_srt_into_chunks(transcription["srt"], max_words=4)
@@ -111,7 +111,7 @@ def process_job(job_id: str):
         import json
         import shutil
         if job.upload_paths:
-            update_job_status(db, job, "processing", "Stitching video clips...", 5)
+            update_job_status(db, job, "processing", "Combining video clips...", 5)
             paths = json.loads(job.upload_paths)
             stitched_path = str(storage.get_processing_path(job_id, "stitched.mp4"))
             ffmpeg.stitch_videos(paths, stitched_path)
@@ -131,7 +131,7 @@ def process_job(job_id: str):
 
         analyze_and_prepare_video(db, job, input_video, cut_video_path)
 
-        update_job_status(db, job, "rendering", "Extracting thumbnail options...", 65)
+        update_job_status(db, job, "rendering", "Preparing thumbnails...", 65)
         thumb_dir = str(storage.get_export_path(job_id, ""))
         candidates = ffmpeg.extract_thumbnail_candidates(cut_video_path, thumb_dir, count=10)
         job.thumbnail_candidates = candidates
@@ -172,7 +172,7 @@ def prepare_existing_thumbnail_selection(job_id: str):
         cut_video_path = str(storage.get_processing_path(job_id, "cut.mp4"))
         analyze_and_prepare_video(db, job, job.upload_path, cut_video_path)
 
-        update_job_status(db, job, "rendering", "Refreshing thumbnail options...", 65)
+        update_job_status(db, job, "rendering", "Refreshing thumbnails...", 65)
         thumb_dir = str(storage.get_export_path(job_id, ""))
         job.thumbnail_candidates = ffmpeg.extract_thumbnail_candidates(
             cut_video_path,
@@ -261,7 +261,7 @@ def continue_processing(job_id: str, selected_thumbnail_index: int = 1, thumbnai
         job.thumbnail_path_en = thumb_paths["en"]
         db.commit()
 
-        update_job_status(db, job, "rendering", "Rendering video with karaoke captions...", 80)
+        update_job_status(db, job, "rendering", "Rendering video...", 80)
         output_path = str(storage.get_export_path(job_id, "video.mp4"))
         ffmpeg.render_video_with_captions_and_outro(
             cut_video_path,
@@ -272,6 +272,8 @@ def continue_processing(job_id: str, selected_thumbnail_index: int = 1, thumbnai
             job_id=str(job.id),
             thumbnail_path=thumb_paths["fi"],  # Prepend Finnish thumbnail WITH TEXT
             thumbnail_duration=settings.thumbnail_duration_seconds,
+            progress_base=80,
+            progress_ceiling=99,
         )
         job.output_video_path = output_path
 

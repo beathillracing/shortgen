@@ -58,6 +58,8 @@ def process_precaptioned_job(job_id: str):
             job_id=job_id,
             duration=duration,
             append_outro=True,  # Outro appended in same encode
+            progress_base=0,
+            progress_ceiling=45,
         )
         job.output_video_path = output_path
 
@@ -69,7 +71,7 @@ def process_precaptioned_job(job_id: str):
         ffmpeg.extract_audio(output_path, audio_path)
 
         # Step 3: Transcribe (for metadata generation only) (60-75%)
-        update_job_status(db, job, "transcribing", "Transcribing for metadata...", 60)
+        update_job_status(db, job, "transcribing", "Transcribing audio...", 60)
 
         transcription = whisper.transcribe_audio(audio_path)
         job.transcript = transcription["transcript"]
@@ -97,7 +99,7 @@ def process_precaptioned_job(job_id: str):
         db.commit()
 
         # Step 5: Generate thumbnails (85-100%)
-        update_job_status(db, job, "rendering", "Generating thumbnail candidates...", 85)
+        update_job_status(db, job, "rendering", "Preparing thumbnails...", 85)
 
         # Extract multiple thumbnail candidates for user to choose from
         thumb_dir = str(storage.get_export_path(job_id, ""))

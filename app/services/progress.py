@@ -35,19 +35,33 @@ def clear_progress(job_id: str):
     redis_client.delete(f"job_progress:{job_id}")
 
 
-def run_ffmpeg_with_progress(cmd: list, job_id: str, duration: float, step_name: str = "Processing") -> subprocess.CompletedProcess:
+def run_ffmpeg_with_progress(
+    cmd: list,
+    job_id: str,
+    duration: float,
+    step_name: str = None,
+    base_percent: int = None,
+    ceiling_percent: int = 99,
+) -> subprocess.CompletedProcess:
     """
-    Run ffmpeg command while tracking progress.
+    Run an ffmpeg command while reporting real progress.
 
-    Args:
-        cmd: FFmpeg command list
-        job_id: Job ID for progress tracking
-        duration: Total duration in seconds (for calculating %)
-        step_name: Name of current step
+    The live ffmpeg position is mapped into the [base_percent, ceiling_percent]
+    band so the overall job bar advances smoothly within the current stage
+    instead of resetting to the render-relative percentage. When base_percent or
+    step_name are omitted they are read from the job's current progress so the
+    worker's stage label and starting percentage are preserved.
     """
-    # Add progress output to ffmpeg
+    current = get_progress(job_id)
+    if base_percent is None:
+        base_percent = current.get("percent", 0)
+    if step_name is None:
+        step_name = current.get("step", "")
+    if ceiling_percent <= base_percent:
+        ceiling_percent = min(base_percent + 1, 99)
+    span = ceiling_percent - base_percent
+
     cmd_with_progress = cmd.copy()
-    # Insert -progress pipe:1 after ffmpeg
     if cmd_with_progress[0] == "ffmpeg":
         cmd_with_progress.insert(1, "-progress")
         cmd_with_progress.insert(2, "pipe:1")
@@ -58,42 +72,34 @@ def run_ffmpeg_with_progress(cmd: list, job_id: str, duration: float, step_name:
         cmd_with_progress,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        universal_newlines=True
+        universal_newlines=True,
     )
 
-    current_time = 0
+    def report(current_time):
+        if not duration or duration <= 0:
+            return
+        fraction = max(0.0, min(current_time / duration, 1.0))
+        percent = min(base_percent + int(fraction * span), ceiling_percent)
+        set_progress(job_id, percent, step_name)
 
-    # Read progress from stdout
     for line in process.stdout:
-        # Parse out_time_ms or out_time
         if line.startswith("out_time_ms="):
             try:
-                time_ms = int(line.split("=")[1].strip())
-                current_time = time_ms / 1000000  # Convert microseconds to seconds
-                percent = min(int((current_time / duration) * 100), 99)
-                set_progress(job_id, percent, step_name)
+                report(int(line.split("=")[1].strip()) / 1000000)
             except (ValueError, IndexError):
                 pass
         elif line.startswith("out_time="):
             try:
                 time_str = line.split("=")[1].strip()
-                # Parse HH:MM:SS.microseconds
                 match = re.match(r"(\d+):(\d+):(\d+\.?\d*)", time_str)
                 if match:
                     h, m, s = match.groups()
-                    current_time = int(h) * 3600 + int(m) * 60 + float(s)
-                    percent = min(int((current_time / duration) * 100), 99)
-                    set_progress(job_id, percent, step_name)
+                    report(int(h) * 3600 + int(m) * 60 + float(s))
             except (ValueError, IndexError):
                 pass
 
-    # Wait for completion
     process.wait()
     stderr = process.stderr.read()
-
     return subprocess.CompletedProcess(
-        args=cmd,
-        returncode=process.returncode,
-        stdout="",
-        stderr=stderr
+        args=cmd, returncode=process.returncode, stdout="", stderr=stderr
     )
