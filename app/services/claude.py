@@ -1,7 +1,110 @@
 import json
-from anthropic import Anthropic
+import logging
+import time
+
+import httpx
+from anthropic import APIStatusError, Anthropic, NotFoundError
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_MODEL_CANDIDATES = [
+    "claude-sonnet-4-6",
+    "claude-sonnet-4-5-20250929",
+    "claude-haiku-4-5-20251001",
+]
+
+_MODELS_CACHE = {"expires_at": 0.0, "ids": None}
+
+
+def _split_models(value: str) -> list[str]:
+    return [model.strip() for model in (value or "").split(",") if model.strip()]
+
+
+def _available_model_ids() -> list[str]:
+    """Return currently available Anthropic model IDs, cached briefly."""
+    now = time.time()
+    if _MODELS_CACHE["ids"] is not None and _MODELS_CACHE["expires_at"] > now:
+        return _MODELS_CACHE["ids"]
+
+    if not settings.anthropic_api_key:
+        return []
+
+    try:
+        response = httpx.get(
+            "https://api.anthropic.com/v1/models",
+            headers={
+                "x-api-key": settings.anthropic_api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            timeout=10,
+        )
+        response.raise_for_status()
+        data = response.json().get("data", [])
+        model_ids = [item["id"] for item in data if item.get("id")]
+    except Exception as exc:
+        logger.warning("Could not refresh Anthropic model list: %s", exc)
+        model_ids = []
+
+    _MODELS_CACHE["ids"] = model_ids
+    _MODELS_CACHE["expires_at"] = now + 3600
+    return model_ids
+
+
+def _model_candidates() -> list[str]:
+    configured = [
+        settings.anthropic_model,
+        *_split_models(settings.anthropic_fallback_models),
+        *DEFAULT_MODEL_CANDIDATES,
+    ]
+
+    available = _available_model_ids()
+    # Prefer lower-cost/current Sonnet and Haiku models over expensive Opus/Fable
+    # models when automatically extending the fallback list.
+    auto_fallbacks = [
+        model for model in available
+        if "sonnet" in model or "haiku" in model
+    ]
+
+    candidates = []
+    seen = set()
+    for model in [*configured, *auto_fallbacks]:
+        if model and model not in seen:
+            candidates.append(model)
+            seen.add(model)
+    return candidates
+
+
+def _is_model_not_found(exc: Exception) -> bool:
+    if isinstance(exc, NotFoundError):
+        return True
+    return isinstance(exc, APIStatusError) and exc.status_code == 404 and "model" in str(exc).lower()
+
+
+def _create_message(client: Anthropic, *, max_tokens: int, messages: list[dict]):
+    errors = []
+    for model in _model_candidates():
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                messages=messages,
+            )
+            if model != settings.anthropic_model:
+                logger.warning("Anthropic model fallback used: %s", model)
+            return response
+        except Exception as exc:
+            if not _is_model_not_found(exc):
+                raise
+            logger.warning("Anthropic model unavailable, trying fallback: %s", model)
+            errors.append(f"{model}: {exc}")
+
+    raise RuntimeError(
+        "No configured Anthropic model is available. Tried: "
+        + ", ".join(_model_candidates())
+        + (f". Last errors: {' | '.join(errors[-3:])}" if errors else "")
+    )
 
 
 def analyze_transcript(transcript: str, video_duration: float, context: str = None, minimal_cuts: bool = False) -> dict:
@@ -12,6 +115,7 @@ def analyze_transcript(transcript: str, video_duration: float, context: str = No
     - Description
     - Hashtags
     - Hook/opening line
+    - Short thumbnail text overlays
     """
     client = Anthropic(api_key=settings.anthropic_api_key)
 
@@ -65,6 +169,12 @@ Please analyze the content and provide:
 
 5. HOOK: The opening hook/first line that grabs attention
 
+6. THUMBNAIL_TEXT: A short, punchy thumbnail overlay in both languages.
+   - Maximum 2-4 words
+   - ALL CAPS
+   - Relevant to the actual content
+   - Can create curiosity, but must not be misleading
+
 Respond in this exact JSON format with BOTH Finnish and English versions:
 {{
     "cut_plan": {{
@@ -81,13 +191,15 @@ Respond in this exact JSON format with BOTH Finnish and English versions:
     "description_en": "Description in English",
     "hashtags": ["hashtag1", "hashtag2", ...],
     "hook_fi": "Koukku suomeksi",
-    "hook_en": "Hook in English"
+    "hook_en": "Hook in English",
+    "thumbnail_text_fi": "LYHYT TEKSTI",
+    "thumbnail_text_en": "SHORT TEXT"
 }}
 
 Only respond with valid JSON, no other text."""
 
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+    response = _create_message(
+        client,
         max_tokens=2000,
         messages=[{"role": "user", "content": prompt}]
     )
@@ -151,8 +263,8 @@ Respond in this exact JSON format:
 
 Only respond with JSON, nothing else."""
 
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
+    response = _create_message(
+        client,
         max_tokens=100,
         messages=[{"role": "user", "content": prompt}]
     )

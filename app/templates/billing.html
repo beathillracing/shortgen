@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Usage - ShortGen{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2 class="mb-2">API Usage</h2>
+    <div id="billing-period" class="text-muted text-small mb-2"></div>
+    <div id="billing-grid" class="grid grid-2"></div>
+</div>
+
+<script>
+function money(value) {
+    if (value === null || value === undefined) return "—";
+    return "$" + Number(value).toFixed(2);
+}
+
+function statusColor(status) {
+    if (status === "ok") return "var(--primary)";
+    if (status === "setup_needed") return "#ff9800";
+    if (status === "dashboard_only") return "#607d8b";
+    return "#c62828";
+}
+
+function renderProvider(provider) {
+    const remainingRow = provider.remaining_usd === null || provider.remaining_usd === undefined
+        ? ""
+        : `<div><span class="text-muted">Budget left</span><br><strong>${money(provider.remaining_usd)}</strong></div>`;
+
+    const creditBalance = provider.credit_balance_available
+        ? money(provider.credit_balance_usd)
+        : "Not available via API";
+
+    return `
+        <div class="card" style="margin-bottom: 0;">
+            <div style="display: flex; justify-content: space-between; gap: 1rem; align-items: start; margin-bottom: 1rem;">
+                <h3>${provider.provider}</h3>
+                <span class="status" style="background: ${statusColor(provider.status)};">${provider.status.replace("_", " ")}</span>
+            </div>
+            <div class="grid grid-2">
+                <div><span class="text-muted">Spent</span><br><strong>${money(provider.spent_usd)}</strong></div>
+                <div><span class="text-muted">Actual credits left</span><br><strong>${creditBalance}</strong></div>
+                <div><span class="text-muted">Monthly budget</span><br><strong>${money(provider.budget_usd)}</strong></div>
+                ${remainingRow}
+                <div><span class="text-muted">Source</span><br><strong>${provider.source}</strong></div>
+            </div>
+            ${provider.message ? `<p class="text-muted text-small mt-2">${provider.message}</p>` : ""}
+        </div>
+    `;
+}
+
+async function loadBilling() {
+    const grid = document.getElementById("billing-grid");
+    const period = document.getElementById("billing-period");
+    grid.innerHTML = '<p class="text-muted">Loading...</p>';
+
+    try {
+        const resp = await fetch("/api/billing/status");
+        const data = await resp.json();
+        period.textContent = `${data.period_start.slice(0, 10)} to ${data.period_end.slice(0, 10)} UTC`;
+        grid.innerHTML = data.providers.map(renderProvider).join("");
+    } catch (err) {
+        grid.innerHTML = `<p class="text-muted">Failed to load usage: ${err.message}</p>`;
+    }
+}
+
+loadBilling();
+</script>
+{% endblock %}

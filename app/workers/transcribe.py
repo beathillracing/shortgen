@@ -16,12 +16,89 @@ def get_db_session():
     return Session()
 
 
+def analyze_and_prepare_video(db, job: Job, input_video: str, cut_video_path: str):
+    """Transcribe, analyze, cut, and prepare caption files before thumbnail selection."""
+    video_info = ffmpeg.get_video_info(input_video)
+
+    update_job_status(db, job, "transcribing", "Extracting audio...", 20)
+    audio_path = str(storage.get_processing_path(str(job.id), "audio.mp3"))
+    ffmpeg.extract_audio(input_video, audio_path)
+
+    update_job_status(db, job, "transcribing", "Transcribing with Whisper large-v3...", 30)
+    transcription = whisper.transcribe_audio(audio_path)
+    job.transcript = transcription["transcript"]
+    job.srt_content = whisper.split_srt_into_chunks(transcription["srt"], max_words=4)
+    db.commit()
+
+    update_job_status(
+        db,
+        job,
+        "analyzing",
+        "Generating titles, descriptions and thumbnail text...",
+        45,
+    )
+    analysis = claude.analyze_transcript(
+        job.transcript,
+        video_info["duration"],
+        context=job.context_description,
+        minimal_cuts=(job.minimal_cuts == "true"),
+    )
+
+    job.cut_plan = analysis.get("cut_plan")
+    job.suggested_title_fi = analysis.get("title_fi", "")
+    job.suggested_title_en = analysis.get("title_en", "")
+    job.suggested_description_fi = analysis.get("description_fi", "")
+    job.suggested_description_en = analysis.get("description_en", "")
+    job.suggested_hashtags = analysis.get("hashtags", [])
+    job.suggested_hook_fi = analysis.get("hook_fi", "")
+    job.suggested_hook_en = analysis.get("hook_en", "")
+    job.suggested_thumbnail_text_fi = analysis.get("thumbnail_text_fi", "")
+    job.suggested_thumbnail_text_en = analysis.get("thumbnail_text_en", "")
+    db.commit()
+
+    # Older/fallback model responses may omit the new fields.
+    if not job.suggested_thumbnail_text_fi or not job.suggested_thumbnail_text_en:
+        thumb_text = claude.generate_thumbnail_text(
+            job.suggested_title_fi or "",
+            job.suggested_title_en or "",
+            job.context_description,
+        )
+        job.suggested_thumbnail_text_fi = (
+            job.suggested_thumbnail_text_fi or thumb_text.get("text_fi", "KATSO")
+        )
+        job.suggested_thumbnail_text_en = (
+            job.suggested_thumbnail_text_en or thumb_text.get("text_en", "WATCH")
+        )
+        db.commit()
+
+    update_job_status(db, job, "rendering", "Preparing final cut...", 55)
+    segments_to_keep = []
+    if job.cut_plan and job.cut_plan.get("segments"):
+        for segment in job.cut_plan["segments"]:
+            if segment.get("keep", True):
+                segments_to_keep.append(
+                    {"start": segment["start"], "end": segment["end"]}
+                )
+
+    if segments_to_keep:
+        ffmpeg.cut_segments(input_video, cut_video_path, segments_to_keep)
+
+    srt_path = storage.get_processing_path(str(job.id), "captions.srt")
+    srt_path.write_text(job.srt_content or "")
+
+    if transcription.get("ass"):
+        ass_path = storage.get_processing_path(str(job.id), "captions.ass")
+        ass_path.write_text(transcription["ass"])
+
+
 def process_job(job_id: str):
     """
-    Phase 1: Extract thumbnails and wait for user selection.
+    Phase 1: Analyze the video, then wait for thumbnail selection.
     1. Stitch multiple videos (if needed)
-    2. Extract thumbnail candidates
-    3. STOP - wait for user to select thumbnail
+    2. Transcribe and analyze content
+    3. Prepare smart cuts and captions
+    4. Extract thumbnail candidates from the prepared video
+    5. STOP - wait for user to select thumbnail with AI text prefilled
     """
     db = get_db_session()
 
@@ -49,21 +126,28 @@ def process_job(job_id: str):
         # For now, just copy - we'll do smart cuts after transcription in phase 2
         shutil.copy(input_video, cut_video_path)
 
-        # Step 2: Extract thumbnail candidates
-        update_job_status(db, job, "processing", "Extracting thumbnail options...", 20)
+        job.upload_path = input_video
+        db.commit()
+
+        analyze_and_prepare_video(db, job, input_video, cut_video_path)
+
+        update_job_status(db, job, "rendering", "Extracting thumbnail options...", 65)
         thumb_dir = str(storage.get_export_path(job_id, ""))
         candidates = ffmpeg.extract_thumbnail_candidates(cut_video_path, thumb_dir, count=10)
         job.thumbnail_candidates = candidates
-
-        # Store the input video path for phase 2
-        job.upload_path = input_video  # Update to stitched if applicable
         db.commit()
 
-        # STOP HERE - wait for user to select thumbnail
-        update_job_status(db, job, "thumbnail_selection", "Choose your thumbnail", 25)
+        update_job_status(
+            db,
+            job,
+            "thumbnail_selection",
+            "Choose your thumbnail and review the suggested text",
+            70,
+        )
         clear_progress(str(job.id))
 
     except Exception as e:
+        db.rollback()
         job.status = "failed"
         job.error_message = str(e)
         job.current_step = "error"
@@ -74,13 +158,53 @@ def process_job(job_id: str):
         db.close()
 
 
+def prepare_existing_thumbnail_selection(job_id: str):
+    """Upgrade a job paused under the old pre-analysis thumbnail workflow."""
+    db = get_db_session()
+    job = None
+    try:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if not job:
+            raise ValueError(f"Job {job_id} not found")
+        if job.status != "thumbnail_selection":
+            raise ValueError(f"Job is not awaiting thumbnail selection: {job.status}")
+
+        cut_video_path = str(storage.get_processing_path(job_id, "cut.mp4"))
+        analyze_and_prepare_video(db, job, job.upload_path, cut_video_path)
+
+        update_job_status(db, job, "rendering", "Refreshing thumbnail options...", 65)
+        thumb_dir = str(storage.get_export_path(job_id, ""))
+        job.thumbnail_candidates = ffmpeg.extract_thumbnail_candidates(
+            cut_video_path,
+            thumb_dir,
+            count=10,
+        )
+        db.commit()
+        update_job_status(
+            db,
+            job,
+            "thumbnail_selection",
+            "Choose your thumbnail and review the suggested text",
+            70,
+        )
+        clear_progress(str(job.id))
+    except Exception as exc:
+        if job:
+            db.rollback()
+            job.status = "failed"
+            job.error_message = str(exc)
+            job.current_step = "error"
+            db.commit()
+        raise
+    finally:
+        db.close()
+
+
 def continue_processing(job_id: str, selected_thumbnail_index: int = 1, thumbnail_text_fi: str = None, thumbnail_text_en: str = None):
     """
     Phase 2: Continue processing after thumbnail selection.
-    1. Extract audio & transcribe
-    2. Analyze with Claude
-    3. Generate thumbnail with text
-    4. Render video with selected thumbnail prepended
+    1. Apply selected thumbnail and suggested/custom text
+    2. Render the already analyzed/prepared video
     """
     db = get_db_session()
 
@@ -103,79 +227,26 @@ def continue_processing(job_id: str, selected_thumbnail_index: int = 1, thumbnai
         base_thumb_path = selected_thumb["path"] if selected_thumb else None
         job.selected_thumbnail_index = str(selected_thumbnail_index)
 
-        # Step 1: Extract audio
-        update_job_status(db, job, "transcribing", "Extracting audio...", 30)
-        video_info = ffmpeg.get_video_info(input_video)
-        audio_path = str(storage.get_processing_path(job_id, "audio.mp3"))
-        ffmpeg.extract_audio(input_video, audio_path)
+        # Compatibility for jobs that reached selection under the old workflow.
+        if not job.transcript or not job.suggested_title_fi:
+            analyze_and_prepare_video(db, job, input_video, cut_video_path)
 
-        # Step 2: Transcribe with Whisper large-v3
-        update_job_status(db, job, "transcribing", "Transcribing with Whisper large-v3...", 35)
-        transcription = whisper.transcribe_audio(audio_path)
-        job.transcript = transcription["transcript"]
-        job.srt_content = whisper.split_srt_into_chunks(transcription["srt"], max_words=4)
-        db.commit()
-
-        # Step 3: Analyze with Claude
-        update_job_status(db, job, "analyzing", "Generating titles & descriptions...", 50)
-        analysis = claude.analyze_transcript(
-            job.transcript,
-            video_info["duration"],
-            context=job.context_description,
-            minimal_cuts=(job.minimal_cuts == "true")
-        )
-
-        job.cut_plan = analysis.get("cut_plan")
-        job.suggested_title_fi = analysis.get("title_fi", "")
-        job.suggested_title_en = analysis.get("title_en", "")
-        job.suggested_description_fi = analysis.get("description_fi", "")
-        job.suggested_description_en = analysis.get("description_en", "")
-        job.suggested_hashtags = analysis.get("hashtags", [])
-        job.suggested_hook_fi = analysis.get("hook_fi", "")
-        job.suggested_hook_en = analysis.get("hook_en", "")
-        db.commit()
-
-        # Step 4: Cut segments if we have a cut plan
-        update_job_status(db, job, "rendering", "Cutting video segments...", 55)
-        segments_to_keep = []
-        if job.cut_plan and job.cut_plan.get("segments"):
-            for seg in job.cut_plan["segments"]:
-                if seg.get("keep", True):
-                    segments_to_keep.append({
-                        "start": seg["start"],
-                        "end": seg["end"]
-                    })
-
-        if segments_to_keep:
-            ffmpeg.cut_segments(input_video, cut_video_path, segments_to_keep)
-        # else: already copied in phase 1
-
-        # Save caption files
         srt_path = str(storage.get_processing_path(job_id, "captions.srt"))
-        with open(srt_path, "w") as f:
-            f.write(job.srt_content or "")
+        ass_file = storage.get_processing_path(job_id, "captions.ass")
+        ass_path = str(ass_file) if ass_file.exists() else None
 
-        ass_path = None
-        if transcription.get("ass"):
-            ass_path = str(storage.get_processing_path(job_id, "captions.ass"))
-            with open(ass_path, "w") as f:
-                f.write(transcription["ass"])
+        update_job_status(db, job, "rendering", "Creating thumbnail...", 75)
 
-        # Step 5: Generate thumbnail with text
-        update_job_status(db, job, "rendering", "Creating thumbnail...", 60)
-
-        # Use custom text if provided, otherwise generate with AI
-        if thumbnail_text_fi and thumbnail_text_en:
-            text_fi = thumbnail_text_fi
-            text_en = thumbnail_text_en
-        else:
-            thumb_text = claude.generate_thumbnail_text(
-                job.suggested_title_fi or "",
-                job.suggested_title_en or "",
-                job.context_description
-            )
-            text_fi = thumbnail_text_fi or thumb_text.get("text_fi", "KATSO")
-            text_en = thumbnail_text_en or thumb_text.get("text_en", "WATCH")
+        text_fi = (
+            thumbnail_text_fi
+            or job.suggested_thumbnail_text_fi
+            or "KATSO"
+        )
+        text_en = (
+            thumbnail_text_en
+            or job.suggested_thumbnail_text_en
+            or "WATCH"
+        )
 
         export_dir = storage.get_export_path(job_id, "")
         thumb_paths = thumbnail.create_thumbnail_variants(
@@ -190,8 +261,7 @@ def continue_processing(job_id: str, selected_thumbnail_index: int = 1, thumbnai
         job.thumbnail_path_en = thumb_paths["en"]
         db.commit()
 
-        # Step 6: Render video with thumbnail prepended
-        update_job_status(db, job, "rendering", "Rendering video with karaoke captions...", 65)
+        update_job_status(db, job, "rendering", "Rendering video with karaoke captions...", 80)
         output_path = str(storage.get_export_path(job_id, "video.mp4"))
         ffmpeg.render_video_with_captions_and_outro(
             cut_video_path,
@@ -201,7 +271,7 @@ def continue_processing(job_id: str, selected_thumbnail_index: int = 1, thumbnai
             burn_captions=(job.burn_captions == "true"),
             job_id=str(job.id),
             thumbnail_path=thumb_paths["fi"],  # Prepend Finnish thumbnail WITH TEXT
-            thumbnail_duration=0.3,
+            thumbnail_duration=settings.thumbnail_duration_seconds,
         )
         job.output_video_path = output_path
 
@@ -215,12 +285,15 @@ def continue_processing(job_id: str, selected_thumbnail_index: int = 1, thumbnai
                         title=job.suggested_title_fi or job.suggested_title_en or "Short Video",
                         description=job.suggested_description_fi or job.suggested_description_en or "",
                         tags=job.suggested_hashtags or [],
-                        privacy="private",
+                        privacy="public",
                         is_short=True,
                         thumbnail_path=job.thumbnail_path_fi or job.thumbnail_path
                     )
                     job.youtube_video_id = result["video_id"]
                     job.youtube_url = result["url"]
+                    job.youtube_content_type = "short"
+                    job.youtube_thumbnail_status = "mobile_selection_required"
+                    job.youtube_thumbnail_error = result.get("thumbnail_error")
                 else:
                     job.error_message = "YouTube auto-post enabled but not authenticated"
             except Exception as yt_err:
@@ -232,6 +305,7 @@ def continue_processing(job_id: str, selected_thumbnail_index: int = 1, thumbnai
 
     except Exception as e:
         # Mark job as failed
+        db.rollback()
         job.status = "failed"
         job.error_message = str(e)
         job.current_step = "error"

@@ -64,14 +64,14 @@
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
         <div>
             <label for="thumb_text_fi">Finnish text (use Enter for multiple lines)</label>
-            <textarea id="thumb_text_fi" rows="2" placeholder="e.g. LÄHTEEKÖ&#10;KÄYNTIIN?" style="resize: vertical;"></textarea>
+            <textarea id="thumb_text_fi" rows="2" placeholder="e.g. LÄHTEEKÖ&#10;KÄYNTIIN?" style="resize: vertical;">{{ job.suggested_thumbnail_text_fi or '' }}</textarea>
         </div>
         <div>
             <label for="thumb_text_en">English text (use Enter for multiple lines)</label>
-            <textarea id="thumb_text_en" rows="2" placeholder="e.g. WILL IT&#10;START?" style="resize: vertical;"></textarea>
+            <textarea id="thumb_text_en" rows="2" placeholder="e.g. WILL IT&#10;START?" style="resize: vertical;">{{ job.suggested_thumbnail_text_en or '' }}</textarea>
         </div>
     </div>
-    <p class="text-muted text-small mb-2">Leave empty to auto-generate text with AI. Use Enter for line breaks.</p>
+    <p class="text-muted text-small mb-2">Suggested from the video analysis. Edit freely and use Enter for line breaks.</p>
 
     <button class="btn" onclick="applyThumbnail()" id="apply-thumb-btn">Apply Selected Thumbnail</button>
 </div>
@@ -112,7 +112,7 @@ function selectThumbnail(index) {
 async function applyThumbnail() {
     const btn = document.getElementById('apply-thumb-btn');
     btn.disabled = true;
-    btn.textContent = 'Generating...';
+    btn.textContent = 'Generating thumbnail and video...';
 
     const textFi = document.getElementById('thumb_text_fi').value.trim();
     const textEn = document.getElementById('thumb_text_en').value.trim();
@@ -205,38 +205,135 @@ function copyEnglish() {
     <pre style="white-space: pre-wrap; background: var(--bg); padding: 1rem; border-radius: 4px; max-height: 200px; overflow-y: auto;">{{ job.transcript or 'No transcript available' }}</pre>
 </div>
 
-<!-- YouTube -->
+<!-- Publishing -->
 <div class="card">
-    <h3 class="mb-2">YouTube</h3>
-    {% if job.youtube_url %}
-    <p style="margin-bottom: 0.5rem;">Video uploaded to YouTube (private):</p>
-    <a href="{{ job.youtube_url }}" target="_blank" class="btn" style="background: #c4302b;">View on YouTube</a>
-    <p class="text-muted text-small mt-2">Video ID: {{ job.youtube_video_id }}</p>
-    {% else %}
-    <p class="text-muted mb-2">Upload to YouTube after choosing your thumbnail</p>
+    <h3 class="mb-2">Publish</h3>
 
-    <div style="margin-bottom: 1rem;">
-        <label>Which thumbnail?</label>
-        <select id="yt-thumbnail" style="width: auto; display: inline-block; margin-left: 0.5rem;">
-            <option value="fi">Finnish</option>
-            <option value="en">English</option>
-            <option value="clean">Clean (no text)</option>
-        </select>
+    <div class="publish-connections" style="margin-bottom: 1rem;">
+        <div style="padding: 0.75rem; background: var(--bg-secondary); border-radius: 4px;">
+            <p class="text-muted text-small mb-1">YouTube</p>
+            <p id="youtube-publish-status" class="text-muted text-small">Checking...</p>
+            <a id="youtube-connect-btn" href="/api/youtube/auth" class="btn btn-secondary" style="padding: 0.5rem 0.75rem;">Connect YouTube</a>
+        </div>
+        <div style="padding: 0.75rem; background: var(--bg-secondary); border-radius: 4px;">
+            <p class="text-muted text-small mb-1">Meta</p>
+            <p id="meta-status" class="text-muted text-small">Checking...</p>
+            <a id="meta-connect-btn" href="/api/meta/auth" class="btn btn-secondary" style="padding: 0.5rem 0.75rem;">Connect Meta</a>
+        </div>
+        <div style="padding: 0.75rem; background: var(--bg-secondary); border-radius: 4px;">
+            <p class="text-muted text-small mb-1">TikTok</p>
+            <p id="tiktok-status" class="text-muted text-small">Checking...</p>
+            <a id="tiktok-connect-btn" href="/api/tiktok/auth" class="btn btn-secondary" style="padding: 0.5rem 0.75rem;">Connect TikTok</a>
+        </div>
     </div>
 
-    <div style="margin-bottom: 1rem;">
-        <label>Which title/description?</label>
-        <select id="yt-language" style="width: auto; display: inline-block; margin-left: 0.5rem;">
-            <option value="fi">Finnish</option>
-            <option value="en">English</option>
-        </select>
+    <div style="padding: 1rem; background: var(--bg-secondary); border-radius: 4px; margin-bottom: 1rem;">
+        <label class="mb-1">Post to</label>
+        <div class="publish-platforms">
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" id="publish-youtube" style="width: auto;" {% if job.youtube_video_id %}disabled{% endif %}>
+                <span>YouTube</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" id="publish-instagram" style="width: auto;" {% if job.instagram_media_id %}disabled{% endif %}>
+                <span>Instagram</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" id="publish-facebook" style="width: auto;" {% if job.facebook_video_id %}disabled{% endif %}>
+                <span>Facebook</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer;">
+                <input type="checkbox" id="publish-tiktok" style="width: auto;" {% if job.tiktok_publish_id %}disabled{% endif %}>
+                <span>TikTok draft</span>
+            </label>
+        </div>
     </div>
 
-    <button class="btn" id="yt-upload-btn" onclick="uploadToYouTube()" style="background: #c4302b;">
-        Upload to YouTube (Private)
-    </button>
-    <p class="text-muted text-small mt-2">Will upload as private. You can change visibility on YouTube later.</p>
-    {% endif %}
+    <div class="publish-options" style="gap: 1rem; margin-bottom: 1rem;">
+        <div>
+            <label for="publish-thumbnail">Thumbnail / cover</label>
+            <select id="publish-thumbnail">
+                <option value="fi">Finnish</option>
+                <option value="en">English</option>
+                <option value="clean">Clean (no text)</option>
+            </select>
+        </div>
+        <div>
+            <label for="publish-language">Caption language</label>
+            <select id="publish-language">
+                <option value="fi">Finnish</option>
+                <option value="en">English</option>
+            </select>
+        </div>
+        <div>
+            <label for="yt-content-type">YouTube type</label>
+            <select id="yt-content-type">
+                <option value="short">Short</option>
+                <option value="video">Regular video</option>
+            </select>
+        </div>
+    </div>
+
+    <button class="btn" id="publish-selected-btn" onclick="publishSelected()" style="width: 100%;">Publish selected</button>
+    <p id="publish-progress" class="text-muted text-small mt-2"></p>
+    <p class="text-muted text-small mt-2">YouTube uploads publicly. Vertical or square videos up to three minutes may still be classified as Shorts automatically.</p>
+
+    <div style="display: grid; gap: 0.5rem;">
+        <p class="text-small">
+            <strong>YouTube:</strong>
+            {% if job.youtube_url %}
+                <a href="{{ job.youtube_url }}" target="_blank">View video</a>
+                <button class="btn btn-secondary" onclick="resetYouTubeUpload()" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">Allow reupload</button>
+                {% if job.youtube_thumbnail_status == 'mobile_selection_required' %}
+                    <br><span style="color: #ffb74d;">Shorts shelf thumbnail cannot be controlled through the YouTube API. Mobile frame editing may not be available after an API upload.</span>
+                {% elif job.youtube_thumbnail_status == 'uploaded' %}
+                    <br><span style="color: #4caf50;">Custom thumbnail uploaded.</span>
+                {% elif job.youtube_thumbnail_status == 'failed' %}
+                    <br><span style="color: #ef5350;">Custom thumbnail upload failed.</span>
+                {% endif %}
+            {% else %}
+                not uploaded
+            {% endif %}
+        </p>
+        <p class="text-small">
+            <strong>Instagram:</strong>
+            {% if job.instagram_url %}
+                <a href="{{ job.instagram_url }}" target="_blank">View post</a>
+            {% else %}
+                {{ job.instagram_status or 'not posted' }}
+            {% endif %}
+            {% if job.instagram_media_id %}
+                <button class="btn btn-secondary" onclick="resetSocial('instagram')" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;" title="Allow another Instagram upload">Allow reupload</button>
+            {% endif %}
+        </p>
+        <p class="text-small">
+            <strong>Facebook:</strong>
+            {% if job.facebook_url %}
+                <a href="{{ job.facebook_url }}" target="_blank">View post</a>
+            {% else %}
+                {{ job.facebook_status or 'not posted' }}
+            {% endif %}
+            {% if job.facebook_video_id %}
+                <button class="btn btn-secondary" onclick="setFacebookThumbnail()" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">Set thumbnail again</button>
+                <button class="btn btn-secondary" onclick="resetSocial('facebook')" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;" title="Allow another Facebook upload">Allow reupload</button>
+            {% endif %}
+        </p>
+        <p class="text-small">
+            <strong>TikTok:</strong>
+            {{ job.tiktok_status or 'not uploaded' }}
+            {% if job.tiktok_publish_id %}
+                <span class="text-muted">ID: {{ job.tiktok_publish_id }}</span>
+                <button class="btn btn-secondary" onclick="refreshTikTokStatus()" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;">Refresh status</button>
+                <button class="btn btn-secondary" onclick="resetSocial('tiktok')" style="padding: 0.25rem 0.5rem; margin-left: 0.5rem;" title="Allow another TikTok upload">Allow reupload</button>
+            {% endif %}
+        </p>
+    </div>
+    <div class="panel" style="padding: 0.75rem; background: var(--bg-secondary); border-radius: 4px; margin-top: 1rem;">
+        <strong>Reliable YouTube Shorts thumbnail</strong>
+        <p class="text-muted text-small mt-2">Download the finished video on your phone, upload it through the YouTube mobile app, and select the opening thumbnail frame before publishing.</p>
+        <a class="btn btn-secondary" href="/api/jobs/{{ job.id }}/video/download" style="margin-top: 0.75rem;">Download for mobile upload</a>
+    </div>
+    <p id="tiktok-capability" class="text-muted text-small mt-2">TikTok currently uploads a draft for review in the TikTok app.</p>
 </div>
 
 <!-- Export -->
@@ -272,14 +369,14 @@ function copyEnglish() {
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem;">
         <div>
             <label for="thumb_text_fi">Finnish thumbnail text (optional)</label>
-            <textarea id="thumb_text_fi" rows="2" placeholder="e.g. LÄHTEEKÖ&#10;KÄYNTIIN?" style="resize: vertical;"></textarea>
+            <textarea id="thumb_text_fi" rows="2" placeholder="e.g. LÄHTEEKÖ&#10;KÄYNTIIN?" style="resize: vertical;">{{ job.suggested_thumbnail_text_fi or '' }}</textarea>
         </div>
         <div>
             <label for="thumb_text_en">English thumbnail text (optional)</label>
-            <textarea id="thumb_text_en" rows="2" placeholder="e.g. WILL IT&#10;START?" style="resize: vertical;"></textarea>
+            <textarea id="thumb_text_en" rows="2" placeholder="e.g. WILL IT&#10;START?" style="resize: vertical;">{{ job.suggested_thumbnail_text_en or '' }}</textarea>
         </div>
     </div>
-    <p class="text-muted text-small mb-2">Leave empty to auto-generate text with AI based on content. Use Enter for line breaks.</p>
+    <p class="text-muted text-small mb-2">Suggested from the title and content analysis. Edit freely and use Enter for line breaks.</p>
 
     <button class="btn" onclick="continueProcessing()" id="continue-btn" style="width: 100%; padding: 1rem; font-size: 1.1rem;">
         Continue Processing with Selected Thumbnail
@@ -417,39 +514,249 @@ async function updateStatus(newStatus) {
     }
 }
 
-async function uploadToYouTube() {
-    const btn = document.getElementById('yt-upload-btn');
-    const thumbnail = document.getElementById('yt-thumbnail').value;
-    const language = document.getElementById('yt-language').value;
-
-    btn.disabled = true;
-    btn.textContent = 'Uploading...';
+async function resetYouTubeUpload() {
+    if (!confirm('Clear the saved YouTube upload for this job? The existing YouTube video will not be deleted.')) return;
 
     try {
-        const resp = await fetch('/api/jobs/{{ job.id }}/youtube', {
+        const resp = await fetch('/api/jobs/{{ job.id }}/youtube/reset', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                thumbnail: thumbnail,
-                language: language
-            })
+            headers: {'Content-Type': 'application/json'}
         });
 
-        const data = await resp.json();
-
         if (resp.ok) {
-            alert('Uploaded! Video ID: ' + data.video_id);
             location.reload();
         } else {
-            alert('Upload failed: ' + (data.detail || data.error || 'Unknown error'));
-            btn.disabled = false;
-            btn.textContent = 'Upload to YouTube (Private)';
+            const data = await resp.json();
+            alert('Reset failed: ' + (data.detail || data.error || 'Unknown error'));
         }
     } catch (e) {
-        alert('Upload failed: ' + e.message);
-        btn.disabled = false;
-        btn.textContent = 'Upload to YouTube (Private)';
+        alert('Reset failed: ' + e.message);
     }
 }
+
+async function checkSocialStatus() {
+    if (!document.getElementById('meta-status') || !document.getElementById('tiktok-status')) {
+        return;
+    }
+    try {
+        const youtubeResp = await fetch('/api/youtube/status');
+        const youtube = await youtubeResp.json();
+        const youtubeEl = document.getElementById('youtube-publish-status');
+        const youtubeConnect = document.getElementById('youtube-connect-btn');
+        const youtubeCheckbox = document.getElementById('publish-youtube');
+        if (!youtube.credentials_configured) {
+            youtubeEl.textContent = 'Credentials missing';
+            youtubeConnect.style.display = 'none';
+            youtubeCheckbox.disabled = true;
+        } else if (!youtube.authenticated) {
+            youtubeEl.textContent = 'Not connected';
+            youtubeConnect.style.display = 'inline-block';
+            youtubeCheckbox.disabled = true;
+        } else {
+            youtubeEl.textContent = 'Connected';
+            youtubeEl.style.color = '#4caf50';
+            youtubeConnect.style.display = 'none';
+        }
+    } catch (e) {
+        document.getElementById('youtube-publish-status').textContent = 'Status check failed';
+        document.getElementById('publish-youtube').disabled = true;
+    }
+
+    try {
+        const metaResp = await fetch('/api/meta/status');
+        const meta = await metaResp.json();
+        const metaEl = document.getElementById('meta-status');
+        const metaConnect = document.getElementById('meta-connect-btn');
+        const metaCheckboxes = ['publish-instagram', 'publish-facebook']
+            .map(id => document.getElementById(id))
+            .filter(Boolean);
+        if (!meta.configured) {
+            metaEl.innerHTML = 'Meta app credentials missing';
+            metaConnect.style.display = 'none';
+            metaCheckboxes.forEach(input => input.disabled = true);
+        } else if (!meta.authenticated) {
+            metaEl.innerHTML = 'Not connected';
+            metaConnect.style.display = 'inline-block';
+            metaCheckboxes.forEach(input => input.disabled = true);
+        } else if (!meta.selected_page_id) {
+            metaEl.innerHTML = 'Connected, but no Page selected';
+            metaConnect.textContent = 'Reconnect Meta';
+            metaConnect.style.display = 'inline-block';
+            metaCheckboxes.forEach(input => input.disabled = true);
+        } else {
+            const ig = meta.instagram_username ? ` / @${meta.instagram_username}` : '';
+            metaEl.innerHTML = `${meta.selected_page_name}${ig}`;
+            metaEl.style.color = '#4caf50';
+            metaConnect.style.display = 'none';
+        }
+    } catch (e) {
+        document.getElementById('meta-status').textContent = 'Status check failed';
+    }
+
+    try {
+        const tiktokResp = await fetch('/api/tiktok/status');
+        const tiktok = await tiktokResp.json();
+        const ttEl = document.getElementById('tiktok-status');
+        const ttConnect = document.getElementById('tiktok-connect-btn');
+        const ttCheckbox = document.getElementById('publish-tiktok');
+        if (!tiktok.configured) {
+            ttEl.innerHTML = 'TikTok app credentials missing';
+            ttConnect.style.display = 'none';
+            ttCheckbox.disabled = true;
+        } else if (!tiktok.authenticated) {
+            ttEl.innerHTML = 'Not connected';
+            ttConnect.style.display = 'inline-block';
+            ttCheckbox.disabled = true;
+        } else {
+            const account = tiktok.display_name ? `: ${tiktok.display_name}` : '';
+            ttEl.innerHTML = `Connected${account}`;
+            ttEl.style.color = '#4caf50';
+            ttConnect.style.display = 'none';
+            const capability = document.getElementById('tiktok-capability');
+            capability.textContent = tiktok.direct_post_authorized
+                ? 'Draft upload and direct post are authorized.'
+                : 'Draft upload is authorized. Direct post requires TikTok video.publish approval and reconnecting the account.';
+        }
+    } catch (e) {
+        document.getElementById('tiktok-status').textContent = 'Status check failed';
+    }
+}
+
+async function publishSelected() {
+    const btn = document.getElementById('publish-selected-btn');
+    const selected = [
+        ['youtube', 'YouTube'],
+        ['instagram', 'Instagram'],
+        ['facebook', 'Facebook'],
+        ['tiktok', 'TikTok']
+    ].filter(([platform]) => document.getElementById(`publish-${platform}`).checked);
+    const payload = {
+        platforms: selected.map(([platform]) => platform),
+        thumbnail: document.getElementById('publish-thumbnail').value,
+        language: document.getElementById('publish-language').value,
+        content_type: document.getElementById('yt-content-type').value
+    };
+
+    if (!selected.length) {
+        alert('Select at least one platform.');
+        return;
+    }
+    if (!confirm(`Publish to: ${selected.map(([, label]) => label).join(', ')}?`)) return;
+
+    btn.disabled = true;
+    btn.textContent = 'Queueing...';
+    try {
+        const resp = await fetch('/api/jobs/{{ job.id }}/publish', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            updatePublishStatus();
+        } else {
+            alert('Could not queue publishing: ' + (data.detail || data.error || 'Unknown error'));
+            btn.disabled = false;
+            btn.textContent = 'Publish selected';
+        }
+    } catch (e) {
+        alert('Could not queue publishing: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = 'Publish selected';
+    }
+}
+
+async function updatePublishStatus(reloadOnFinish = true) {
+    const btn = document.getElementById('publish-selected-btn');
+    const progress = document.getElementById('publish-progress');
+    try {
+        const resp = await fetch('/api/jobs/{{ job.id }}/publish/status');
+        const data = await resp.json();
+        if (['queued', 'running'].includes(data.status)) {
+            btn.disabled = true;
+            btn.textContent = data.status === 'queued' ? 'Queued...' : 'Publishing...';
+            const current = data.current_platform ? `: ${data.current_platform}` : '';
+            progress.textContent = `${data.status}${current} (${data.completed || 0}/${data.total || 0}). You can close this tab.`;
+            setTimeout(() => updatePublishStatus(reloadOnFinish), 2000);
+            return;
+        }
+        if (['completed', 'partial', 'failed'].includes(data.status)) {
+            const errors = data.errors || {};
+            progress.textContent = data.status === 'completed'
+                ? 'Publishing completed.'
+                : `Publishing ${data.status}: ${Object.entries(errors).map(([p, e]) => `${p}: ${e}`).join(' | ')}`;
+            if (reloadOnFinish) {
+                setTimeout(() => location.reload(), 1200);
+            } else {
+                btn.disabled = false;
+                btn.textContent = 'Publish selected';
+            }
+            return;
+        }
+        btn.disabled = false;
+        btn.textContent = 'Publish selected';
+    } catch (e) {
+        progress.textContent = 'Could not refresh status. Publishing continues on the server.';
+        setTimeout(updatePublishStatus, 5000);
+    }
+}
+
+async function resetSocial(platform) {
+    if (!confirm(`Clear the saved ${platform} post for this job? Existing posts are not deleted.`)) return;
+    try {
+        const resp = await fetch(`/api/jobs/{{ job.id }}/${platform}/reset`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        if (resp.ok) {
+            location.reload();
+        } else {
+            const data = await resp.json();
+            alert('Reset failed: ' + (data.detail || data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Reset failed: ' + e.message);
+    }
+}
+
+async function setFacebookThumbnail() {
+    const thumbnail = document.getElementById('publish-thumbnail').value;
+    try {
+        const resp = await fetch('/api/jobs/{{ job.id }}/facebook/thumbnail', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({thumbnail})
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            alert('Facebook thumbnail updated.');
+            location.reload();
+        } else {
+            alert('Facebook thumbnail failed: ' + (data.detail || data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Facebook thumbnail failed: ' + e.message);
+    }
+}
+
+async function refreshTikTokStatus() {
+    try {
+        const resp = await fetch('/api/jobs/{{ job.id }}/tiktok/status', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            location.reload();
+        } else {
+            alert('TikTok status failed: ' + (data.detail || data.error || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('TikTok status failed: ' + e.message);
+    }
+}
+
+checkSocialStatus();
+updatePublishStatus(false);
 </script>
 {% endblock %}

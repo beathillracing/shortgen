@@ -82,6 +82,11 @@
             opacity: 0.9;
         }
 
+        .btn:disabled {
+            opacity: 0.45;
+            cursor: not-allowed;
+        }
+
         .btn-secondary {
             background: var(--border);
         }
@@ -149,8 +154,24 @@
             grid-template-columns: repeat(2, 1fr);
         }
 
+        .publish-connections,
+        .publish-options {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.75rem;
+        }
+
+        .publish-platforms {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.75rem;
+        }
+
         @media (max-width: 600px) {
-            .grid-2 {
+            .grid-2,
+            .publish-connections,
+            .publish-options,
+            .publish-platforms {
                 grid-template-columns: 1fr;
             }
         }
@@ -175,6 +196,8 @@
             <nav>
                 <a href="/">Upload</a>
                 <a href="/jobs">Jobs</a>
+                <a href="/mobile">Android</a>
+                <a href="/billing">Usage</a>
             </nav>
         </header>
 

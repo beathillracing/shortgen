@@ -13,6 +13,45 @@ from app.services.storage import get_export_path
 router = APIRouter()
 
 
+def rerender_video_thumbnail_frame(
+    job_id: str,
+    job: Job,
+    thumbnail_path: str | None,
+    prepend_thumbnail: bool = True,
+) -> bool:
+    """Re-render the exported video so its first frame matches the current thumbnail."""
+    from app.services import ffmpeg, storage
+
+    if prepend_thumbnail and (not thumbnail_path or not Path(thumbnail_path).exists()):
+        return False
+
+    cut_video_path = storage.get_processing_path(job_id, "cut.mp4")
+    if not cut_video_path.exists():
+        return False
+
+    output_path = Path(job.output_video_path) if job.output_video_path else storage.get_export_path(job_id, "video.mp4")
+    temp_output_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
+    srt_path = storage.get_processing_path(job_id, "captions.srt")
+    ass_path = storage.get_processing_path(job_id, "captions.ass")
+
+    ffmpeg.render_video_with_captions_and_outro(
+        str(cut_video_path),
+        str(temp_output_path),
+        srt_path=str(srt_path) if srt_path.exists() else None,
+        ass_path=str(ass_path) if ass_path.exists() else None,
+        burn_captions=(job.burn_captions == "true"),
+        job_id=str(job.id),
+        thumbnail_path=thumbnail_path if prepend_thumbnail else None,
+        thumbnail_duration=settings.thumbnail_duration_seconds if prepend_thumbnail else 0,
+    )
+    temp_output_path.replace(output_path)
+    job.output_video_path = str(output_path)
+
+    export_zip_path = settings.storage_path / "exports" / job_id / "export.zip"
+    export_zip_path.unlink(missing_ok=True)
+    return True
+
+
 @router.get("/jobs/{job_id}")
 def get_job(job_id: str, db: Session = Depends(get_db)):
     """Get job status and data."""
@@ -114,6 +153,10 @@ def continue_job(job_id: str, data: dict, db: Session = Depends(get_db)):
     job.status = "processing"
     job.current_step = "Continuing processing..."
     job.selected_thumbnail_index = str(selected_index)
+    if text_fi:
+        job.suggested_thumbnail_text_fi = text_fi
+    if text_en:
+        job.suggested_thumbnail_text_en = text_en
     db.commit()
 
     # Queue the continuation
@@ -197,6 +240,23 @@ def get_video(job_id: str, db: Session = Depends(get_db)):
     return FileResponse(job.output_video_path, media_type="video/mp4")
 
 
+@router.get("/jobs/{job_id}/video/download")
+def download_video(job_id: str, db: Session = Depends(get_db)):
+    """Download the final video for manual mobile-platform upload."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    if not job.output_video_path or not Path(job.output_video_path).exists():
+        raise HTTPException(404, "Video not ready")
+
+    return FileResponse(
+        job.output_video_path,
+        media_type="video/mp4",
+        filename=f"shortgen-{job_id[:8]}.mp4",
+    )
+
+
 @router.get("/jobs/{job_id}/thumbnail/candidate/{index}")
 def get_thumbnail_candidate(job_id: str, index: int, db: Session = Depends(get_db)):
     """Get a thumbnail candidate by index."""
@@ -243,19 +303,19 @@ def select_thumbnail(job_id: str, data: dict, db: Session = Depends(get_db)):
     custom_text_fi = data.get("text_fi")
     custom_text_en = data.get("text_en")
 
-    if custom_text_fi and custom_text_en:
-        # Both provided - use custom text
-        text_fi = custom_text_fi
-        text_en = custom_text_en
-    else:
-        # Generate with AI
+    text_fi = custom_text_fi or job.suggested_thumbnail_text_fi
+    text_en = custom_text_en or job.suggested_thumbnail_text_en
+    if not text_fi or not text_en:
         thumb_text = claude.generate_thumbnail_text(
             job.suggested_title_fi or "",
             job.suggested_title_en or "",
             job.context_description
         )
-        text_fi = custom_text_fi or thumb_text.get("text_fi", "KATSO")
-        text_en = custom_text_en or thumb_text.get("text_en", "WATCH")
+        text_fi = text_fi or thumb_text.get("text_fi", "KATSO")
+        text_en = text_en or thumb_text.get("text_en", "WATCH")
+
+    job.suggested_thumbnail_text_fi = text_fi
+    job.suggested_thumbnail_text_en = text_en
 
     # Create new thumbnails from selected candidate
     thumb_paths = thumbnail.create_thumbnail_variants(
@@ -268,10 +328,17 @@ def select_thumbnail(job_id: str, data: dict, db: Session = Depends(get_db)):
     job.thumbnail_path = thumb_paths["clean"]
     job.thumbnail_path_fi = thumb_paths["fi"]
     job.thumbnail_path_en = thumb_paths["en"]
+    rerendered_video = rerender_video_thumbnail_frame(job_id, job, job.thumbnail_path_fi)
 
     db.commit()
 
-    return {"status": "ok", "selected": index, "text_fi": text_fi, "text_en": text_en}
+    return {
+        "status": "ok",
+        "selected": index,
+        "text_fi": text_fi,
+        "text_en": text_en,
+        "rerendered_video": rerendered_video,
+    }
 
 
 @router.get("/jobs/{job_id}/thumbnail/{variant}")
@@ -349,6 +416,9 @@ def upload_to_youtube(job_id: str, data: dict, db: Session = Depends(get_db)):
     # Get language preference
     lang = data.get("language", "fi")
     thumb_variant = data.get("thumbnail", "fi")
+    content_type = data.get("content_type", "short")
+    if content_type not in ["short", "video"]:
+        raise HTTPException(400, "content_type must be short or video")
 
     # Select title/description based on language
     if lang == "en":
@@ -366,24 +436,58 @@ def upload_to_youtube(job_id: str, data: dict, db: Session = Depends(get_db)):
     else:
         thumbnail_path = job.thumbnail_path
 
+    rerender_video_thumbnail_frame(
+        job_id,
+        job,
+        thumbnail_path,
+        prepend_thumbnail=(content_type == "short"),
+    )
+    db.commit()
+
     # Upload to YouTube
     result = youtube.upload_video(
         video_path=job.output_video_path,
         title=title,
         description=description,
         tags=job.suggested_hashtags or [],
-        privacy="private",
-        is_short=True,
+        privacy="public",
+        is_short=(content_type == "short"),
         thumbnail_path=thumbnail_path
     )
 
     # Save result
     job.youtube_video_id = result["video_id"]
     job.youtube_url = result["url"]
+    job.youtube_content_type = content_type
+    job.youtube_thumbnail_status = (
+        "mobile_selection_required"
+        if content_type == "short"
+        else ("uploaded" if result.get("thumbnail_uploaded") else "failed")
+    )
+    job.youtube_thumbnail_error = result.get("thumbnail_error")
     db.commit()
 
     return {
         "status": "uploaded",
         "video_id": result["video_id"],
-        "url": result["url"]
+        "url": result["url"],
+        "content_type": content_type,
+        "thumbnail_status": job.youtube_thumbnail_status,
     }
+
+
+@router.post("/jobs/{job_id}/youtube/reset")
+def reset_youtube_upload(job_id: str, db: Session = Depends(get_db)):
+    """Clear stored YouTube upload state so the job can be uploaded again."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    job.youtube_video_id = None
+    job.youtube_url = None
+    job.youtube_content_type = None
+    job.youtube_thumbnail_status = None
+    job.youtube_thumbnail_error = None
+    db.commit()
+
+    return {"status": "reset"}

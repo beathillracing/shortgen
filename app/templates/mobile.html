@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+
+{% block title %}Android - ShortGen{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h2 class="mb-2">Android App</h2>
+    <p class="text-muted mb-2">Version 0.7.0 downloads and verifies updates inside the app before opening Android's installer. The web interface remains available as a backup.</p>
+
+    <a class="btn mb-2" href="/public/shortgen-android.apk">Download Full APK</a>
+
+    <label for="mobile-token">Mobile API token</label>
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.75rem;">
+        <input id="mobile-token" value="{{ mobile_api_token }}" readonly>
+        <button class="btn btn-secondary" type="button" onclick="copyMobileToken()">Copy</button>
+    </div>
+    <p id="copy-status" class="text-muted text-small"></p>
+</div>
+
+<div class="card">
+    <h2 class="mb-2">Creator Edition</h2>
+    <p class="text-muted mb-2">Separate app for video creation and exports. It cannot publish to social platforms and cannot access full-account jobs.</p>
+
+    <a class="btn mb-2" href="/public/shortgen-creator-android.apk">Download Creator APK</a>
+
+    <label for="creator-token">Creator API token</label>
+    <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0.75rem;">
+        <input id="creator-token" value="{{ mobile_creator_api_token }}" readonly>
+        <button class="btn btn-secondary" type="button" onclick="copyToken('creator-token')">Copy</button>
+    </div>
+</div>
+
+<div class="card">
+    <h2 class="mb-2">Beathill Studio Access</h2>
+    <p class="text-muted mb-2">
+        Users appear here after linking Google in the app. Unlimited access bypasses
+        monthly processing limits. Publishing access is controlled separately.
+    </p>
+
+    <label for="access-email">Google account email</label>
+    <input id="access-email" type="email" placeholder="friend@gmail.com">
+
+    <div class="grid grid-2">
+        <label>
+            <input id="access-unlimited" type="checkbox" style="width: auto; margin-right: 0.5rem;">
+            Unlimited processing
+        </label>
+        <label>
+            <input id="access-publishing" type="checkbox" style="width: auto; margin-right: 0.5rem;">
+            Allow publishing
+        </label>
+    </div>
+
+    <label for="access-limit">Custom monthly limit (optional)</label>
+    <input id="access-limit" type="number" min="1" placeholder="Uses default Free limit">
+
+    <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+        <button class="btn" type="button" onclick="saveAccess()">Save access</button>
+        <button class="btn btn-secondary" type="button" onclick="resetAccess()">Reset to Free</button>
+    </div>
+    <p id="access-status" class="text-muted text-small mt-2"></p>
+
+    <div style="overflow-x: auto; margin-top: 1rem;">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                    <th style="padding: 0.5rem;">Email</th>
+                    <th style="padding: 0.5rem;">Plan</th>
+                    <th style="padding: 0.5rem;">Usage</th>
+                    <th style="padding: 0.5rem;">Publishing</th>
+                </tr>
+            </thead>
+            <tbody id="access-accounts"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+async function copyMobileToken() {
+    await copyToken("mobile-token");
+}
+
+async function copyToken(id) {
+    const input = document.getElementById(id);
+    await navigator.clipboard.writeText(input.value);
+    document.getElementById("copy-status").textContent = "Token copied.";
+}
+
+function selectAccount(account) {
+    document.getElementById("access-email").value = account.email || "";
+    document.getElementById("access-unlimited").checked = account.plan === "unlimited";
+    document.getElementById("access-publishing").checked = !!account.publishing_enabled;
+    document.getElementById("access-limit").value =
+        account.plan === "unlimited" ? "" : (account.usage?.jobs_limit || "");
+}
+
+async function loadAccounts() {
+    const response = await fetch("/api/admin/mobile-access");
+    const data = await response.json();
+    const body = document.getElementById("access-accounts");
+    body.replaceChildren();
+    const accounts = data.accounts || [];
+    if (!accounts.length) {
+        const row = body.insertRow();
+        const cell = row.insertCell();
+        cell.colSpan = 4;
+        cell.className = "text-muted";
+        cell.style.padding = "0.75rem";
+        cell.textContent = "No Google-linked accounts yet.";
+        return;
+    }
+    accounts.forEach(account => {
+        const usage = account.usage || {};
+        const values = [
+            account.email || "",
+            account.plan || "free",
+            usage.jobs_limit == null
+                ? `${usage.jobs_used || 0} / unlimited`
+                : `${usage.jobs_used || 0} / ${usage.jobs_limit}`,
+            account.publishing_enabled ? "Allowed" : "Disabled",
+        ];
+        const row = body.insertRow();
+        row.style.borderBottom = "1px solid var(--border)";
+        row.style.cursor = "pointer";
+        row.onclick = () => selectAccount(account);
+        values.forEach(value => {
+            const cell = row.insertCell();
+            cell.style.padding = "0.5rem";
+            cell.textContent = value;
+        });
+    });
+}
+
+async function saveAccess() {
+    const payload = {
+        email: document.getElementById("access-email").value.trim(),
+        unlimited: document.getElementById("access-unlimited").checked,
+        publishing_enabled: document.getElementById("access-publishing").checked,
+        monthly_job_limit: document.getElementById("access-limit").value,
+    };
+    const response = await fetch("/api/admin/mobile-access", {
+        method: "PUT",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(payload),
+    });
+    const data = await response.json();
+    document.getElementById("access-status").textContent =
+        response.ok ? "Access updated." : (data.detail || "Update failed.");
+    if (response.ok) await loadAccounts();
+}
+
+async function resetAccess() {
+    const email = document.getElementById("access-email").value.trim();
+    const response = await fetch(`/api/admin/mobile-access/${encodeURIComponent(email)}`, {
+        method: "DELETE",
+    });
+    const data = await response.json();
+    document.getElementById("access-status").textContent =
+        response.ok ? "Account reset to Free." : (data.detail || "Reset failed.");
+    if (response.ok) await loadAccounts();
+}
+
+loadAccounts();
+</script>
+{% endblock %}

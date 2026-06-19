@@ -1,0 +1,24 @@
+{% extends "public_base.html" %}
+{% block title %}ShortGen by Beathill Racing{% endblock %}
+{% block content %}
+<h1>ShortGen</h1>
+<p class="intro">ShortGen is a video preparation and publishing tool operated by Beathill Racing. It turns source footage into platform-ready videos and lets an authorized user choose where each finished video is published.</p>
+
+<p><a class="button" href="/public/shortgen-android.apk">Download Android app</a></p>
+
+<div class="panel">
+    <h2 style="margin-top: 0;">Publishing workflow</h2>
+    <ul>
+        <li>The user uploads or prepares a video inside ShortGen.</li>
+        <li>The user reviews the rendered video, thumbnail, caption and language.</li>
+        <li>The user explicitly selects YouTube, Instagram, Facebook or TikTok.</li>
+        <li>ShortGen publishes only after the user presses the publish button.</li>
+    </ul>
+</div>
+
+<h2>TikTok integration</h2>
+<p>ShortGen uses TikTok Login Kit and the Content Posting API. Draft upload sends a selected video to the authorized TikTok account for review in TikTok. Direct posting is used only when TikTok grants the required permission and the user explicitly selects it.</p>
+
+<h2>Account control</h2>
+<p>Users authorize their own platform accounts through OAuth and can revoke access through the relevant platform settings. ShortGen does not ask users to provide their social-media passwords.</p>
+{% endblock %}

@@ -7,6 +7,14 @@ from typing import Optional
 from app.config import settings
 
 
+def _configured_outro_duration(outro_path: Path) -> float:
+    configured_duration = max(float(settings.outro_duration_seconds or 0), 0.0)
+    if configured_duration <= 0:
+        return 0.0
+
+    return min(configured_duration, get_video_info(str(outro_path))["duration"])
+
+
 def append_outro(input_path: str, output_path: str) -> str:
     """
     Append the outro clip to the end of a video.
@@ -19,10 +27,16 @@ def append_outro(input_path: str, output_path: str) -> str:
         shutil.copy(input_path, output_path)
         return output_path
 
+    outro_duration = _configured_outro_duration(outro_path)
+    if outro_duration <= 0:
+        shutil.copy(input_path, output_path)
+        return output_path
+
     # Use filter_complex concat for reliable joining of different video specs
     cmd = [
         "ffmpeg",
         "-i", input_path,
+        "-t", str(outro_duration),
         "-i", str(outro_path),
         "-filter_complex",
         "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[outv][outa]",
@@ -286,7 +300,8 @@ def render_video_with_captions_and_outro(
 
     # Check for outro
     outro_path = settings.assets_path / "outro.mp4"
-    has_outro = outro_path.exists()
+    outro_duration = _configured_outro_duration(outro_path) if outro_path.exists() else 0.0
+    has_outro = outro_duration > 0
 
     cmd = ["ffmpeg"]
     input_idx = 0
@@ -314,7 +329,7 @@ def render_video_with_captions_and_outro(
 
     # Add outro input if exists
     if has_outro:
-        cmd.extend(["-i", str(outro_path)])
+        cmd.extend(["-t", str(outro_duration), "-i", str(outro_path)])
         outro_idx = input_idx
 
     # Build filter chain
@@ -356,14 +371,19 @@ def render_video_with_captions_and_outro(
             )
             current_video = "[captioned]"
 
-    # Rename to main_video for concat
-    filter_parts.append(f"{current_video}copy[main_video]")
+    # Reset timestamps before concat. Multi-file phone videos can retain edit-list
+    # discontinuities that otherwise make FFmpeg repeat the preceding thumbnail.
+    filter_parts.append(f"{current_video}setpts=PTS-STARTPTS[main_video]")
+    filter_parts.append(
+        f"[{main_video_idx}:a]aresample=48000,asetpts=PTS-STARTPTS[main_audio]"
+    )
 
     # Prepare thumbnail if exists (scale to target resolution)
     if has_thumbnail:
         filter_parts.append(
             f"[{thumb_idx}:v]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
-            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black,fps=30[thumb_v]"
+            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"fps=30,trim=duration={thumbnail_duration},setpts=PTS-STARTPTS[thumb_v]"
         )
         # Generate silence for the thumbnail duration
         filter_parts.append(
@@ -379,15 +399,19 @@ def render_video_with_captions_and_outro(
         audio_streams.append("[thumb_a]")
 
     video_streams.append("[main_video]")
-    audio_streams.append(f"[{main_video_idx}:a]")
+    audio_streams.append("[main_audio]")
 
     if has_outro:
         filter_parts.append(
             f"[{outro_idx}:v]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
-            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black[outro_v]"
+            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"fps=30,setpts=PTS-STARTPTS[outro_v]"
+        )
+        filter_parts.append(
+            f"[{outro_idx}:a]aresample=48000,asetpts=PTS-STARTPTS[outro_a]"
         )
         video_streams.append("[outro_v]")
-        audio_streams.append(f"[{outro_idx}:a]")
+        audio_streams.append("[outro_a]")
 
     # Concat all parts if more than one stream
     if len(video_streams) > 1:
@@ -402,7 +426,7 @@ def render_video_with_captions_and_outro(
         final_audio = "[final_a]"
     else:
         final_video = "[main_video]"
-        final_audio = f"[{main_video_idx}:a]"
+        final_audio = "[main_audio]"
 
     # Build complete filter_complex string
     filter_complex = ";".join(filter_parts)
@@ -426,8 +450,7 @@ def render_video_with_captions_and_outro(
     if has_thumbnail:
         total_duration += thumbnail_duration
     if has_outro:
-        outro_info = get_video_info(str(outro_path))
-        total_duration += outro_info["duration"]
+        total_duration += outro_duration
 
     # Use progress tracking if job_id provided
     if job_id:
@@ -443,32 +466,56 @@ def render_video_with_captions_and_outro(
 
 
 def stitch_videos(input_paths: list, output_path: str) -> str:
-    """Stitch multiple video files together in order."""
+    """Stitch clips after normalizing timestamps, frame rate, size, and audio."""
     if len(input_paths) == 1:
         import shutil
         shutil.copy(input_paths[0], output_path)
         return output_path
 
-    # Create concat file
-    concat_file = Path(output_path).parent / "concat_input.txt"
-    with open(concat_file, "w") as f:
-        for path in input_paths:
-            f.write(f"file '{path}'\n")
+    cmd = ["ffmpeg"]
+    infos = []
+    for path in input_paths:
+        cmd.extend(["-i", path])
+        infos.append(get_video_info(path))
 
-    cmd = [
-        "ffmpeg",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", str(concat_file),
-        "-c", "copy",
+    filter_parts = []
+    streams = []
+    for index, info in enumerate(infos):
+        filter_parts.append(
+            f"[{index}:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
+            f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,"
+            f"fps=30,setpts=PTS-STARTPTS[v{index}]"
+        )
+        if info["has_audio"]:
+            filter_parts.append(
+                f"[{index}:a]aresample=48000,asetpts=PTS-STARTPTS[a{index}]"
+            )
+        else:
+            filter_parts.append(
+                f"anullsrc=r=48000:cl=stereo,atrim=duration={info['duration']},"
+                f"asetpts=PTS-STARTPTS[a{index}]"
+            )
+        streams.append(f"[v{index}][a{index}]")
+
+    filter_parts.append(
+        f"{''.join(streams)}concat=n={len(input_paths)}:v=1:a=1[outv][outa]"
+    )
+    cmd.extend([
+        "-filter_complex", ";".join(filter_parts),
+        "-map", "[outv]",
+        "-map", "[outa]",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "20",
+        "-threads", "4",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-movflags", "+faststart",
         "-y",
-        output_path
-    ]
+        output_path,
+    ])
 
     result = subprocess.run(cmd, capture_output=True, text=True)
-
-    # Cleanup
-    concat_file.unlink(missing_ok=True)
 
     if result.returncode != 0:
         raise RuntimeError(f"Video stitching failed: {result.stderr}")
@@ -517,7 +564,8 @@ def remove_capcut_watermark(
 
     # Check for outro
     outro_path = settings.assets_path / "outro.mp4"
-    has_outro = append_outro and outro_path.exists()
+    outro_duration = _configured_outro_duration(outro_path) if append_outro and outro_path.exists() else 0.0
+    has_outro = outro_duration > 0
 
     cmd = ["ffmpeg", "-i", input_path]
     input_idx = 1
@@ -530,7 +578,7 @@ def remove_capcut_watermark(
 
     # Add outro input if exists
     if has_outro:
-        cmd.extend(["-i", str(outro_path)])
+        cmd.extend(["-t", str(outro_duration), "-i", str(outro_path)])
         outro_idx = input_idx
 
     # Build filter chain
@@ -611,8 +659,7 @@ def remove_capcut_watermark(
     # Calculate total duration for progress
     total_duration = trim_to
     if has_outro:
-        outro_info = get_video_info(str(outro_path))
-        total_duration += outro_info["duration"]
+        total_duration += outro_duration
 
     # Use progress tracking if job_id provided
     if job_id:

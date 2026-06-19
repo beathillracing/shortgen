@@ -17,6 +17,52 @@ def get_queue():
     return Queue(connection=redis_conn)
 
 
+def create_and_queue_job(
+    db: Session,
+    upload_paths: list[str],
+    filenames: list[str],
+    *,
+    context: str = "",
+    minimal_cuts: str = "false",
+    burn_captions: str = "false",
+    youtube_autopost: str = "false",
+    precaptioned: str = "false",
+    remove_outro_seconds: str = "3",
+    mobile_owner: str | None = None,
+) -> Job:
+    job = Job(
+        original_filename=", ".join(filenames) if len(filenames) > 1 else filenames[0],
+        upload_path=upload_paths[0],
+        context_description=context if context else None,
+        minimal_cuts=minimal_cuts,
+        burn_captions=burn_captions,
+        youtube_autopost=youtube_autopost,
+        precaptioned=precaptioned,
+        remove_outro_seconds=remove_outro_seconds,
+        mobile_owner=mobile_owner,
+        status="pending",
+        current_step="uploaded",
+    )
+
+    if len(upload_paths) > 1:
+        import json
+
+        job.upload_paths = json.dumps(upload_paths)
+
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    queue = get_queue()
+    worker = (
+        "app.workers.precaptioned.process_precaptioned_job"
+        if precaptioned == "true"
+        else "app.workers.transcribe.process_job"
+    )
+    queue.enqueue(worker, str(job.id), job_timeout="30m")
+    return job
+
+
 @router.post("/upload")
 async def upload_video(
     files: List[UploadFile] = File(...),
@@ -44,43 +90,17 @@ async def upload_video(
         upload_paths.append(upload_path)
         filenames.append(file.filename)
 
-    # Create job record
-    job = Job(
-        original_filename=", ".join(filenames) if len(filenames) > 1 else filenames[0],
-        upload_path=upload_paths[0],  # Primary file
-        context_description=context if context else None,
+    job = create_and_queue_job(
+        db,
+        upload_paths,
+        filenames,
+        context=context,
         minimal_cuts=minimal_cuts,
         burn_captions=burn_captions,
         youtube_autopost=youtube_autopost,
         precaptioned=precaptioned,
         remove_outro_seconds=remove_outro_seconds,
-        status="pending",
-        current_step="uploaded"
     )
-
-    # Store multiple paths as JSON if more than one file
-    if len(upload_paths) > 1:
-        import json
-        job.upload_paths = json.dumps(upload_paths)
-
-    db.add(job)
-    db.commit()
-    db.refresh(job)
-
-    # Queue processing job - use different worker for precaptioned videos
-    queue = get_queue()
-    if precaptioned == "true":
-        queue.enqueue(
-            "app.workers.precaptioned.process_precaptioned_job",
-            str(job.id),
-            job_timeout="30m"
-        )
-    else:
-        queue.enqueue(
-            "app.workers.transcribe.process_job",
-            str(job.id),
-            job_timeout="30m"
-        )
 
     return {
         "job_id": str(job.id),

@@ -1,0 +1,21 @@
+Owner: CN=ShortGen, O=Beathill Racing, C=FI
+Issuer: CN=ShortGen, O=Beathill Racing, C=FI
+Serial number: ba3cbcf9e94f9c7e
+Valid from: Thu Jun 18 18:19:07 EEST 2026 until: Mon Nov 03 17:19:07 EET 2053
+Certificate fingerprints:
+	 SHA1: CF:F9:1A:EF:68:2B:89:64:1F:B2:96:04:FC:88:52:42:46:37:01:88
+	 SHA256: 09:21:6C:DE:47:31:3E:4E:FD:96:65:DD:33:F1:B9:90:92:22:F6:24:6B:75:BE:93:CF:6C:D4:18:AA:55:94:A2
+Signature algorithm name: SHA384withRSA
+Subject Public Key Algorithm: 4096-bit RSA key
+Version: 3
+
+Extensions: 
+
+#1: ObjectId: 2.5.29.14 Criticality=false
+SubjectKeyIdentifier [
+KeyIdentifier [
+0000: 0D 32 1F 75 8F 1B D8 75   5E 2A D0 E2 62 AD D3 8C  .2.u...u^*..b...
+0010: 95 7D F9 E9                                        ....
+]
+]
+

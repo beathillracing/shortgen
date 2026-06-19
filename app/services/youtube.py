@@ -146,7 +146,11 @@ def upload_video(
 
     video_id = response['id']
 
-    # Upload custom thumbnail if provided
+    thumbnail_uploaded = False
+    thumbnail_error = None
+
+    # This sets the normal video thumbnail. YouTube Shorts shelf frame
+    # selection is separate and only available in the YouTube mobile app.
     if thumbnail_path and Path(thumbnail_path).exists():
         try:
             thumb_media = MediaFileUpload(thumbnail_path, mimetype='image/jpeg')
@@ -154,11 +158,15 @@ def upload_video(
                 videoId=video_id,
                 media_body=thumb_media
             ).execute()
+            thumbnail_uploaded = True
         except Exception as e:
             # Thumbnail upload may fail if channel not verified - continue anyway
+            thumbnail_error = str(e)
             print(f"Thumbnail upload failed (channel may need verification): {e}")
 
     return {
         'video_id': video_id,
-        'url': f'https://youtube.com/shorts/{video_id}' if is_short else f'https://youtube.com/watch?v={video_id}'
+        'url': f'https://youtube.com/shorts/{video_id}' if is_short else f'https://youtube.com/watch?v={video_id}',
+        'thumbnail_uploaded': thumbnail_uploaded,
+        'thumbnail_error': thumbnail_error,
     }

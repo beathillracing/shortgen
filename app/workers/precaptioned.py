@@ -92,6 +92,8 @@ def process_precaptioned_job(job_id: str):
         job.suggested_hashtags = analysis.get("hashtags", [])
         job.suggested_hook_fi = analysis.get("hook_fi", "")
         job.suggested_hook_en = analysis.get("hook_en", "")
+        job.suggested_thumbnail_text_fi = analysis.get("thumbnail_text_fi", "")
+        job.suggested_thumbnail_text_en = analysis.get("thumbnail_text_en", "")
         db.commit()
 
         # Step 5: Generate thumbnails (85-100%)
@@ -108,20 +110,26 @@ def process_precaptioned_job(job_id: str):
             thumb_timestamp = video_info["duration"] / 3
             ffmpeg.extract_frame(output_path, base_thumb_path, thumb_timestamp)
 
-        # Generate thumbnail text
-        thumb_text = claude.generate_thumbnail_text(
-            job.suggested_title_fi or "",
-            job.suggested_title_en or "",
-            job.context_description
-        )
+        if not job.suggested_thumbnail_text_fi or not job.suggested_thumbnail_text_en:
+            thumb_text = claude.generate_thumbnail_text(
+                job.suggested_title_fi or "",
+                job.suggested_title_en or "",
+                job.context_description,
+            )
+            job.suggested_thumbnail_text_fi = (
+                job.suggested_thumbnail_text_fi or thumb_text.get("text_fi", "KATSO")
+            )
+            job.suggested_thumbnail_text_en = (
+                job.suggested_thumbnail_text_en or thumb_text.get("text_en", "WATCH")
+            )
 
         # Create thumbnails with text overlays
         export_dir = storage.get_export_path(job_id, "")
         thumb_paths = thumbnail.create_thumbnail_variants(
             base_thumb_path,
             export_dir,
-            thumb_text.get("text_fi", "KATSO"),
-            thumb_text.get("text_en", "WATCH")
+            job.suggested_thumbnail_text_fi or "KATSO",
+            job.suggested_thumbnail_text_en or "WATCH",
         )
 
         job.thumbnail_path = thumb_paths["clean"]

@@ -16,6 +16,12 @@ storage/
 youtube_token.json
 youtube_client_secret.json
 
+# Social OAuth credentials and temporary state
+meta_token.json
+meta_oauth_state
+tiktok_token.json
+tiktok_oauth_state
+
 # IDE
 .idea/
 .vscode/
@@ -25,3 +31,17 @@ youtube_client_secret.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Android local configuration, signing secrets, and build artifacts
+android/.gradle/
+android/.kotlin/
+android/local.properties
+android/*.jks
+android/app/build/
+android/play-store/builds/
+google_play_service_account.json
+
+# Distributed build artifacts (served by app, not source)
+assets/public/*.apk
+assets/public/*.aab
+*.jks
