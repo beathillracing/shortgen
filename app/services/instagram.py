@@ -62,6 +62,23 @@ def exchange_code(code: str) -> dict:
     return token
 
 
+def refresh_token(connection_data: dict) -> dict:
+    with httpx.Client(timeout=30) as client:
+        response = client.get(
+            "https://graph.instagram.com/refresh_access_token",
+            params={
+                "grant_type": "ig_refresh_token",
+                "access_token": connection_data["access_token"],
+            },
+        )
+    response.raise_for_status()
+    refreshed = response.json()
+    data = dict(connection_data)
+    data.update(refreshed)
+    data["expires_at"] = int(time.time()) + int(refreshed.get("expires_in", 0))
+    return data
+
+
 def get_profile(connection_data: dict) -> dict:
     with httpx.Client(timeout=30) as client:
         response = client.get(

@@ -69,6 +69,7 @@ data class PlatformConnection(
     val label: String?,
     val selectedId: String?,
     val options: List<PlatformOption>,
+    val needsReconnect: Boolean,
 )
 
 data class PlatformOption(
@@ -173,6 +174,7 @@ class ShortGenApi(
                             )
                         }
                         .orEmpty(),
+                    needsReconnect = metadata.optBoolean("needs_reconnect"),
                 )
             }
         }

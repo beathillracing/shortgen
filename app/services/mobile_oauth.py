@@ -1,9 +1,11 @@
 import hashlib
 import json
 import secrets
+import time
 from datetime import datetime, timedelta
 
 import httpx
+from google.auth.transport.requests import Request as GoogleRequest
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import Flow
 from sqlalchemy.orm import Session
@@ -53,6 +55,47 @@ def connection_data(db: Session, account_id: str, provider: str) -> dict:
     return decrypt_json(item.encrypted_credentials)
 
 
+def fresh_connection_data(db: Session, account_id: str, provider: str) -> dict:
+    item = connection(db, account_id, provider)
+    if not item:
+        raise ValueError(f"{provider.title()} is not connected")
+    data = decrypt_json(item.encrypted_credentials)
+    now = int(time.time())
+    changed = False
+
+    if provider == "youtube":
+        credentials = Credentials.from_authorized_user_info(data, youtube.SCOPES)
+        if credentials.expired:
+            if not credentials.refresh_token:
+                raise ValueError("YouTube must be reconnected")
+            credentials.refresh(GoogleRequest())
+            data = json.loads(credentials.to_json())
+            changed = True
+    elif provider == "instagram":
+        expires_at = int(data.get("expires_at") or 0)
+        if expires_at and expires_at <= now:
+            raise ValueError("Instagram must be reconnected")
+        if expires_at <= now + 7 * 86400:
+            data = instagram.refresh_token(data)
+            changed = True
+    elif provider == "tiktok":
+        refresh_expires_at = int(data.get("refresh_expires_at") or 0)
+        if refresh_expires_at and refresh_expires_at <= now:
+            raise ValueError("TikTok must be reconnected")
+        if int(data.get("expires_at") or 0) <= now + 3600:
+            data = tiktok.refresh_mobile_token(data)
+            changed = True
+    elif provider == "facebook":
+        expires_at = int(data.get("expires_at") or 0)
+        if expires_at and expires_at <= now:
+            raise ValueError("Facebook must be reconnected")
+
+    if changed:
+        item.encrypted_credentials = encrypt_json(data)
+        db.commit()
+    return data
+
+
 def connection_statuses(db: Session, account_id: str) -> dict:
     result = {}
     for provider in ("youtube", "facebook", "instagram", "tiktok"):
@@ -68,6 +111,28 @@ def connection_statuses(db: Session, account_id: str) -> dict:
                 }
                 for page in data.get("pages", [])
             ]
+        if item:
+            data = decrypt_json(item.encrypted_credentials)
+            expires_at = int(data.get("expires_at") or 0)
+            refresh_expires_at = int(data.get("refresh_expires_at") or 0)
+            now = int(time.time())
+            metadata["expires_at"] = expires_at or None
+            needs_reconnect = bool(
+                provider in {"facebook", "instagram"}
+                and expires_at
+                and expires_at <= now
+            )
+            if provider == "tiktok":
+                needs_reconnect = bool(
+                    refresh_expires_at and refresh_expires_at <= now
+                )
+            if provider == "youtube":
+                credentials = Credentials.from_authorized_user_info(
+                    data,
+                    youtube.SCOPES,
+                )
+                needs_reconnect = credentials.expired and not credentials.refresh_token
+            metadata["needs_reconnect"] = needs_reconnect
         result[provider] = {
             "connected": bool(item),
             "label": item.account_label if item else None,

@@ -91,6 +91,33 @@ def exchange_mobile_code(code: str) -> dict:
     response.raise_for_status()
     token = response.json()
     token["expires_at"] = int(time.time()) + int(token.get("expires_in", 0))
+    token["refresh_expires_at"] = (
+        int(time.time()) + int(token.get("refresh_expires_in", 0))
+    )
+    return token
+
+
+def refresh_mobile_token(connection_data: dict) -> dict:
+    refresh_token = connection_data.get("refresh_token")
+    if not refresh_token:
+        raise ValueError("TikTok must be reconnected")
+    with httpx.Client(timeout=30) as client:
+        response = client.post(
+            f"{API_BASE}/oauth/token/",
+            data={
+                "client_key": settings.tiktok_client_key,
+                "client_secret": settings.tiktok_client_secret,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    response.raise_for_status()
+    token = response.json()
+    token["expires_at"] = int(time.time()) + int(token.get("expires_in", 0))
+    token["refresh_expires_at"] = (
+        int(time.time()) + int(token.get("refresh_expires_in", 0))
+    )
     return token
 
 

@@ -545,9 +545,23 @@ private fun PlatformConnectionRow(
         Text(label)
         if (connection?.connected == true) {
             Text(
-                connection.label ?: "Connected",
-                color = MaterialTheme.colorScheme.primary,
+                if (connection.needsReconnect) {
+                    "${connection.label ?: label} must be reconnected"
+                } else {
+                    connection.label ?: "Connected"
+                },
+                color = if (connection.needsReconnect) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.primary
+                },
             )
+            if (connection.needsReconnect) {
+                Button(
+                    onClick = onConnect,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Reconnect") }
+            }
             OutlinedButton(
                 onClick = onDisconnect,
                 modifier = Modifier.fillMaxWidth(),

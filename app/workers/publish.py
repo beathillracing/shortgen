@@ -4,7 +4,7 @@ from app.database import SessionLocal
 from app.models import Job
 from app.services import instagram, meta, tiktok, youtube
 from app.services.mobile_accounts import entitlement, refresh_subscription_if_due
-from app.services.mobile_oauth import connection_data
+from app.services.mobile_oauth import fresh_connection_data
 from app.services.public_media import media_url
 
 
@@ -58,7 +58,7 @@ def _prepare_video(job: Job, thumbnail_path: str | None, prepend_thumbnail: bool
 def _credentials(db, job: Job, provider: str) -> dict | None:
     if not job.mobile_owner:
         return None
-    return connection_data(db, job.mobile_owner, provider)
+    return fresh_connection_data(db, job.mobile_owner, provider)
 
 
 def _publish_youtube(db, job: Job, options: dict) -> dict:
