@@ -93,6 +93,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 @Composable
@@ -206,11 +207,13 @@ fun UploadScreen(
                 ) {
                     notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
                 }
+                val tokenRef = "upload_token_${UUID.randomUUID()}"
+                SecureStore.put(context, tokenRef, token)
                 val request = OneTimeWorkRequestBuilder<UploadWorker>()
                     .setInputData(
                         Data.Builder()
                             .putString(UploadWorker.KEY_BASE_URL, server.trimEnd('/'))
-                            .putString(UploadWorker.KEY_TOKEN, token)
+                            .putString(UploadWorker.KEY_TOKEN_REF, tokenRef)
                             .putStringArray(
                                 UploadWorker.KEY_URIS,
                                 selectedUris.map(Uri::toString).toTypedArray(),
@@ -1064,8 +1067,8 @@ fun SettingsScreen(
             onClick = {
                 preferences.edit {
                     putString(UploadWorker.KEY_BASE_URL, server.trimEnd('/'))
-                    putString(UploadWorker.KEY_TOKEN, token.trim())
                 }
+                SecureStore.put(context, UploadWorker.KEY_TOKEN, token.trim())
                 onSaved()
             },
             enabled = server.startsWith("https://") && token.isNotBlank(),

@@ -23,6 +23,7 @@ fun DistributionAccountProvisioning(
     preferences: SharedPreferences,
     onProvisioned: () -> Unit,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(server, token) {
         if (!server.startsWith("https://") || token.isNotBlank()) {
             return@LaunchedEffect
@@ -32,18 +33,16 @@ fun DistributionAccountProvisioning(
             ?: UUID.randomUUID().toString().also {
                 preferences.edit { putString(KEY_INSTALLATION_ID, it) }
             }
-        val accessToken = preferences.getString(KEY_PENDING_ACCESS_TOKEN, null)
+        val accessToken = SecureStore.get(context, KEY_PENDING_ACCESS_TOKEN)
             ?: newAccessToken().also {
-                preferences.edit { putString(KEY_PENDING_ACCESS_TOKEN, it) }
+                SecureStore.put(context, KEY_PENDING_ACCESS_TOKEN, it)
             }
 
         runCatching {
             registerInstallation(server.trimEnd('/'), installationId, accessToken)
         }.onSuccess {
-            preferences.edit {
-                putString(UploadWorker.KEY_TOKEN, accessToken)
-                remove(KEY_PENDING_ACCESS_TOKEN)
-            }
+            SecureStore.put(context, UploadWorker.KEY_TOKEN, accessToken)
+            SecureStore.remove(context, KEY_PENDING_ACCESS_TOKEN)
             onProvisioned()
         }
     }

@@ -39,7 +39,9 @@ class UploadWorker(
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val baseUrl = inputData.getString(KEY_BASE_URL)?.trimEnd('/')
-        val token = inputData.getString(KEY_TOKEN)
+        val tokenRef = inputData.getString(KEY_TOKEN_REF)
+        val token = tokenRef?.let { SecureStore.get(applicationContext, it) }
+            ?: inputData.getString(KEY_TOKEN)
         val uriStrings = inputData.getStringArray(KEY_URIS)?.toList().orEmpty()
         if (baseUrl.isNullOrBlank() || token.isNullOrBlank() || uriStrings.isEmpty()) {
             return@withContext Result.failure(errorData("Missing server, token, or video"))
@@ -90,6 +92,7 @@ class UploadWorker(
             )
             preferences.edit { remove(sessionKey) }
             val jobId = completed.getString("job_id")
+            tokenRef?.let { SecureStore.remove(applicationContext, it) }
             Result.success(
                 Data.Builder()
                     .putString(KEY_JOB_ID, jobId)
@@ -97,11 +100,13 @@ class UploadWorker(
                     .build(),
             )
         } catch (terminal: TerminalUploadException) {
+            tokenRef?.let { SecureStore.remove(applicationContext, it) }
             Result.failure(errorData(terminal.message ?: "Upload failed"))
         } catch (error: Exception) {
             if (runAttemptCount < MAX_RETRIES) {
                 Result.retry()
             } else {
+                tokenRef?.let { SecureStore.remove(applicationContext, it) }
                 Result.failure(errorData(error.message ?: "Upload failed"))
             }
         }
@@ -268,6 +273,7 @@ class UploadWorker(
         const val PREFERENCES = "shortgen"
         const val KEY_BASE_URL = "base_url"
         const val KEY_TOKEN = "token"
+        const val KEY_TOKEN_REF = "token_ref"
         const val KEY_URIS = "uris"
         const val KEY_CONTEXT = "context"
         const val KEY_MINIMAL_CUTS = "minimal_cuts"

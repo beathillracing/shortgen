@@ -72,7 +72,7 @@ private fun ShortGenApp(
         preferences.getString(UploadWorker.KEY_BASE_URL, DEFAULT_SERVER) ?: DEFAULT_SERVER
     }
     val token = remember(configVersion) {
-        preferences.getString(UploadWorker.KEY_TOKEN, "").orEmpty()
+        SecureStore.get(context, UploadWorker.KEY_TOKEN).orEmpty()
     }
     val configured = server.startsWith("https://") && token.isNotBlank()
     DistributionAccountProvisioning(

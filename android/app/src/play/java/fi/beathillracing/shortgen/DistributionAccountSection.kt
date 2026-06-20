@@ -36,6 +36,7 @@ import androidx.credentials.exceptions.NoCredentialException
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.work.WorkManager
 import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
@@ -85,7 +86,7 @@ fun DistributionAccountSection(
     var deleteConfirm by remember { mutableStateOf(false) }
     var addingAccount by remember { mutableStateOf(false) }
     var savedAccounts by remember {
-        mutableStateOf(loadSavedAccounts(preferences))
+        mutableStateOf(loadSavedAccounts(context))
     }
 
     fun rememberAccount(status: AccountStatus, accountToken: String) {
@@ -98,7 +99,7 @@ fun DistributionAccountSection(
         )
         savedAccounts = (savedAccounts.filterNot { it.accountId == saved.accountId } + saved)
             .sortedBy { it.label.lowercase() }
-        saveAccounts(preferences, savedAccounts)
+        saveAccounts(context, savedAccounts)
     }
 
     fun refresh() {
@@ -249,7 +250,7 @@ fun DistributionAccountSection(
                 ShortGenApi(server, newToken).linkGoogle(credential)
             }.onSuccess { status ->
                 rememberAccount(status, newToken)
-                preferences.edit { putString(UploadWorker.KEY_TOKEN, newToken) }
+                SecureStore.put(context, UploadWorker.KEY_TOKEN, newToken)
                 addingAccount = false
                 error = null
                 onAccountChanged()
@@ -353,9 +354,7 @@ fun DistributionAccountSection(
             savedAccounts.forEach { saved ->
                 OutlinedButton(
                     onClick = {
-                        preferences.edit {
-                            putString(UploadWorker.KEY_TOKEN, saved.token)
-                        }
+                        SecureStore.put(context, UploadWorker.KEY_TOKEN, saved.token)
                         onAccountChanged()
                     },
                     enabled = saved.token != token,
@@ -473,12 +472,12 @@ fun DistributionAccountSection(
                                     savedAccounts = savedAccounts.filterNot {
                                         it.accountId == deletedAccountId
                                     }
-                                    saveAccounts(preferences, savedAccounts)
+                                    saveAccounts(context, savedAccounts)
                                 }
-                                preferences.edit {
-                                    remove(UploadWorker.KEY_TOKEN)
-                                    remove("installation_id")
-                                }
+                                WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+                                SecureStore.removePrefix(context, "upload_token_")
+                                SecureStore.remove(context, UploadWorker.KEY_TOKEN)
+                                preferences.edit { remove("installation_id") }
                                 deleteConfirm = false
                                 onAccountChanged()
                             }
@@ -495,8 +494,8 @@ fun DistributionAccountSection(
 
 private var billingClientPlaceholder: BillingClient? = null
 
-private fun loadSavedAccounts(preferences: SharedPreferences): List<SavedAccount> {
-    val raw = preferences.getString(SAVED_ACCOUNTS_KEY, null) ?: return emptyList()
+private fun loadSavedAccounts(context: android.content.Context): List<SavedAccount> {
+    val raw = SecureStore.get(context, SAVED_ACCOUNTS_KEY) ?: return emptyList()
     return runCatching {
         val items = JSONArray(raw)
         (0 until items.length()).mapNotNull { index ->
@@ -515,7 +514,7 @@ private fun loadSavedAccounts(preferences: SharedPreferences): List<SavedAccount
 }
 
 private fun saveAccounts(
-    preferences: SharedPreferences,
+    context: android.content.Context,
     accounts: List<SavedAccount>,
 ) {
     val items = JSONArray()
@@ -528,7 +527,7 @@ private fun saveAccounts(
                 .put("token", account.token),
         )
     }
-    preferences.edit { putString(SAVED_ACCOUNTS_KEY, items.toString()) }
+    SecureStore.put(context, SAVED_ACCOUNTS_KEY, items.toString())
 }
 
 @Composable
