@@ -119,12 +119,15 @@ fun UploadScreen(
             ShortGenApi(server.trimEnd('/'), token).getAccount()
         }.getOrNull()
     }
+    val prefs = remember { context.getSharedPreferences(UploadWorker.PREFERENCES, Context.MODE_PRIVATE) }
     var contextText by remember { mutableStateOf("") }
     var selectedUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
-    var minimalCuts by remember { mutableStateOf(false) }
-    var burnCaptions by remember { mutableStateOf(true) }
-    var precaptioned by remember { mutableStateOf(false) }
-    var highlightColor by remember { mutableStateOf("#4CAF50") }
+    var minimalCuts by remember { mutableStateOf(prefs.getBoolean("opt_minimal_cuts", false)) }
+    var burnCaptions by remember { mutableStateOf(prefs.getBoolean("opt_burn_captions", true)) }
+    var precaptioned by remember { mutableStateOf(prefs.getBoolean("opt_precaptioned", false)) }
+    var highlightColor by remember {
+        mutableStateOf(prefs.getString("opt_highlight_color", "#4CAF50") ?: "#4CAF50")
+    }
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
@@ -215,6 +218,12 @@ fun UploadScreen(
                     ) != PackageManager.PERMISSION_GRANTED
                 ) {
                     notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                prefs.edit {
+                    putBoolean("opt_burn_captions", burnCaptions)
+                    putBoolean("opt_minimal_cuts", minimalCuts)
+                    putBoolean("opt_precaptioned", precaptioned)
+                    putString("opt_highlight_color", highlightColor)
                 }
                 val tokenRef = "upload_token_${UUID.randomUUID()}"
                 SecureStore.put(context, tokenRef, token)
@@ -597,15 +606,16 @@ private fun ReviewAndPublish(
     onAction: (suspend () -> Unit) -> Unit,
 ) {
     val context = LocalContext.current
-    var language by remember { mutableStateOf("fi") }
+    val pubPrefs = LocalContext.current.getSharedPreferences(UploadWorker.PREFERENCES, Context.MODE_PRIVATE)
+    var language by remember { mutableStateOf(pubPrefs.getString("pub_language", "fi") ?: "fi") }
     var titleFi by remember(job.summary.id) { mutableStateOf(job.titleFi) }
     var titleEn by remember(job.summary.id) { mutableStateOf(job.titleEn) }
     var descriptionFi by remember(job.summary.id) { mutableStateOf(job.descriptionFi) }
     var descriptionEn by remember(job.summary.id) { mutableStateOf(job.descriptionEn) }
     val title = if (language == "fi") titleFi else titleEn
     val description = if (language == "fi") descriptionFi else descriptionEn
-    var thumbnail by remember { mutableStateOf("fi") }
-    var contentType by remember { mutableStateOf("short") }
+    var thumbnail by remember { mutableStateOf(pubPrefs.getString("pub_thumbnail", "fi") ?: "fi") }
+    var contentType by remember { mutableStateOf(pubPrefs.getString("pub_content_type", "short") ?: "short") }
     var youtube by remember(job.posted.youtube) { mutableStateOf(false) }
     var instagram by remember(job.posted.instagram) { mutableStateOf(false) }
     var facebook by remember(job.posted.facebook) { mutableStateOf(false) }
@@ -767,6 +777,11 @@ private fun ReviewAndPublish(
     }
     Button(
         onClick = {
+            pubPrefs.edit {
+                putString("pub_language", language)
+                putString("pub_thumbnail", thumbnail)
+                putString("pub_content_type", contentType)
+            }
             onAction {
                 api.updateMetadata(job.summary.id, title, description)
                 api.publish(job.summary.id, selectedPlatforms, language, thumbnail, contentType)
