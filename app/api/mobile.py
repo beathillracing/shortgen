@@ -397,10 +397,24 @@ def delete_mobile_account(
                 paths.extend(json.loads(job.upload_paths))
             except (TypeError, json.JSONDecodeError):
                 pass
+        for candidate in (job.thumbnail_candidates or []):
+            candidate_path = candidate.get("path")
+            if candidate_path:
+                paths.append(candidate_path)
         for path in paths:
             if path:
                 Path(path).unlink(missing_ok=True)
         db.delete(job)
+
+    for session_dir in _sessions_dir().iterdir():
+        if not session_dir.is_dir():
+            continue
+        try:
+            metadata = json.loads((session_dir / "session.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if metadata.get("mobile_owner") == account_id:
+            shutil.rmtree(session_dir, ignore_errors=True)
 
     access_rows = db.query(MobileAccess).filter(MobileAccess.account_id == account_id).all()
     access_ids = [row.id for row in access_rows]
