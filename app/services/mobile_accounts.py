@@ -78,6 +78,10 @@ def entitlement(db: Session, account_id: str) -> dict:
             account.subscription_grace_until.isoformat() + "Z"
             if account.subscription_grace_until else None
         ),
+        "subscription_checked_at": (
+            account.subscription_checked_at.isoformat() + "Z"
+            if account.subscription_checked_at else None
+        ),
         "publishing_enabled": active or bool(account.publishing_enabled),
         "usage": {
             "period": period,

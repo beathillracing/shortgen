@@ -1,9 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException
+from redis import Redis
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
-from app.models import MobileAccess, MobileUsage
-from app.services.mobile_accounts import entitlement
+from app.models import Job, MobileAccess, MobileUsage
+from app.services import instagram, meta, tiktok, youtube
+from app.services.mobile_accounts import _publisher_service, entitlement
+from app.services.mobile_oauth import connection_statuses
 
 router = APIRouter()
 
@@ -43,8 +47,69 @@ def list_mobile_accounts(db: Session = Depends(get_db)):
         if row.account_id in seen:
             continue
         seen.add(row.account_id)
-        accounts.append(entitlement(db, row.account_id))
+        payload = entitlement(db, row.account_id)
+        try:
+            payload["connections"] = connection_statuses(db, row.account_id)
+        except Exception:
+            payload["connections"] = {}
+        payload["sessions"] = (
+            db.query(MobileAccess)
+            .filter(
+                MobileAccess.account_id == row.account_id,
+                MobileAccess.active.is_(True),
+            )
+            .count()
+        )
+        payload["jobs_total"] = (
+            db.query(Job).filter(Job.mobile_owner == row.account_id).count()
+        )
+        accounts.append(payload)
     return {"accounts": accounts}
+
+
+@router.get("/mobile-health")
+def mobile_health(db: Session = Depends(get_db)):
+    play_ok = False
+    play_error = None
+    try:
+        _publisher_service().monetization().subscriptions().get(
+            packageName=settings.google_play_package_name,
+            productId=settings.google_play_subscription_product_id,
+        ).execute()
+        play_ok = True
+    except Exception as exc:
+        play_error = str(exc)
+
+    redis_ok = False
+    try:
+        redis_ok = bool(Redis.from_url(settings.redis_url).ping())
+    except Exception:
+        pass
+
+    return {
+        "play_subscription": {
+            "ok": play_ok,
+            "product_id": settings.google_play_subscription_product_id,
+            "error": play_error,
+        },
+        "providers": {
+            "youtube": youtube.Path(youtube.CREDENTIALS_FILE).exists(),
+            "facebook": meta.is_configured(),
+            "instagram": instagram.is_configured(),
+            "tiktok": tiktok.is_configured(),
+        },
+        "redis": redis_ok,
+        "accounts": (
+            db.query(MobileAccess.account_id)
+            .filter(
+                MobileAccess.active.is_(True),
+                MobileAccess.email.isnot(None),
+            )
+            .distinct()
+            .count()
+        ),
+        "jobs": db.query(Job).filter(Job.mobile_owner.isnot(None)).count(),
+    }
 
 
 @router.put("/mobile-access")

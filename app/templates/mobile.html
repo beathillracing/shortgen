@@ -68,11 +68,18 @@
                     <th style="padding: 0.5rem;">Plan</th>
                     <th style="padding: 0.5rem;">Usage</th>
                     <th style="padding: 0.5rem;">Publishing</th>
+                    <th style="padding: 0.5rem;">Connections</th>
+                    <th style="padding: 0.5rem;">Jobs</th>
                 </tr>
             </thead>
             <tbody id="access-accounts"></tbody>
         </table>
     </div>
+</div>
+
+<div class="card">
+    <h2 class="mb-2">Play and Publishing Health</h2>
+    <div id="mobile-health" class="grid grid-2"></div>
 </div>
 
 <script>
@@ -103,7 +110,7 @@ async function loadAccounts() {
     if (!accounts.length) {
         const row = body.insertRow();
         const cell = row.insertCell();
-        cell.colSpan = 4;
+        cell.colSpan = 6;
         cell.className = "text-muted";
         cell.style.padding = "0.75rem";
         cell.textContent = "No Google-linked accounts yet.";
@@ -111,6 +118,15 @@ async function loadAccounts() {
     }
     accounts.forEach(account => {
         const usage = account.usage || {};
+        const connections = account.connections || {};
+        const connectionText = ["youtube", "facebook", "instagram", "tiktok"]
+            .map(provider => {
+                const item = connections[provider] || {};
+                if (!item.connected) return `${provider}: off`;
+                if (item.metadata?.needs_reconnect) return `${provider}: reconnect`;
+                return `${provider}: on`;
+            })
+            .join(" · ");
         const values = [
             account.email || "",
             account.plan || "free",
@@ -118,6 +134,8 @@ async function loadAccounts() {
                 ? `${usage.jobs_used || 0} / unlimited`
                 : `${usage.jobs_used || 0} / ${usage.jobs_limit}`,
             account.publishing_enabled ? "Allowed" : "Disabled",
+            connectionText,
+            `${account.jobs_total || 0} jobs / ${account.sessions || 0} sessions`,
         ];
         const row = body.insertRow();
         row.style.borderBottom = "1px solid var(--border)";
@@ -160,6 +178,43 @@ async function resetAccess() {
     if (response.ok) await loadAccounts();
 }
 
+async function loadHealth() {
+    const response = await fetch("/api/admin/mobile-health");
+    const data = await response.json();
+    const health = document.getElementById("mobile-health");
+    health.replaceChildren();
+    const items = [
+        [
+            "Play subscription",
+            data.play_subscription?.ok
+                ? `Ready: ${data.play_subscription.product_id}`
+                : `Blocked: ${data.play_subscription?.error || "not configured"}`,
+            !!data.play_subscription?.ok,
+        ],
+        ["Redis queue", data.redis ? "Ready" : "Unavailable", !!data.redis],
+        [
+            "Providers",
+            Object.entries(data.providers || {})
+                .map(([name, ready]) => `${name}: ${ready ? "ready" : "missing"}`)
+                .join(" · "),
+            Object.values(data.providers || {}).every(Boolean),
+        ],
+        ["Mobile data", `${data.accounts || 0} linked accounts · ${data.jobs || 0} jobs`, true],
+    ];
+    items.forEach(([label, value, ok]) => {
+        const item = document.createElement("div");
+        const heading = document.createElement("strong");
+        const detail = document.createElement("div");
+        heading.textContent = label;
+        detail.textContent = value;
+        detail.style.color = ok ? "var(--primary)" : "#ef5350";
+        detail.style.overflowWrap = "anywhere";
+        item.append(heading, detail);
+        health.append(item);
+    });
+}
+
 loadAccounts();
+loadHealth();
 </script>
 {% endblock %}
