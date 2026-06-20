@@ -355,6 +355,21 @@ def mobile_connection_facebook_page(
     return {"connections": connection_statuses(db, identity["owner"])}
 
 
+@router.post("/fcm-token")
+def register_fcm_token(
+    data: dict,
+    identity: dict = Depends(_mobile_identity),
+    db: Session = Depends(get_db),
+):
+    token = str(data.get("token") or "").strip()
+    if not token:
+        raise HTTPException(400, "Token is required")
+    if identity.get("access_id"):
+        from app.services.push import register_token
+        register_token(db, identity["access_id"], token)
+    return {"status": "ok"}
+
+
 @router.post("/billing/verify")
 def mobile_verify_subscription(
     data: dict,

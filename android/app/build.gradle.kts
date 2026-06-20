@@ -4,6 +4,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services")
 }
 
 val localProperties = Properties().apply {
@@ -20,8 +21,8 @@ android {
         applicationId = "fi.beathillracing.shortgen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.10.2"
+        versionCode = 13
+        versionName = "0.10.3"
     }
 
     productFlavors {
@@ -104,6 +105,8 @@ dependencies {
     "playImplementation"("androidx.credentials:credentials-play-services-auth:1.6.0")
     "playImplementation"("com.google.android.libraries.identity.googleid:googleid:1.2.0")
     "playImplementation"("com.google.android.play:app-update:2.1.0")
+    "playImplementation"(platform("com.google.firebase:firebase-bom:33.7.0"))
+    "playImplementation"("com.google.firebase:firebase-messaging")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

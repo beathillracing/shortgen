@@ -104,6 +104,7 @@ private fun ShortGenApp(
         onProvisioned = { configVersion += 1 },
     )
     DistributionUpdatePrompt(server, token, configured)
+    DistributionPushSetup(server, token)
 
     BackHandler(enabled = selectedJobId != null) {
         selectedJobId = null

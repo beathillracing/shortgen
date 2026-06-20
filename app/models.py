@@ -158,6 +158,7 @@ class MobileAccess(Base):
     subscription_grace_until = Column(DateTime)
     monthly_job_limit = Column(Integer)
     deleted_at = Column(DateTime)
+    fcm_token = Column(String(255))
 
 
 class OAuthConnection(Base):

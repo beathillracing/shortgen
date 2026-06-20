@@ -45,3 +45,5 @@ google_play_service_account.json
 assets/public/*.apk
 assets/public/*.aab
 *.jks
+firebase_admin.json
+android/app/google-services.json

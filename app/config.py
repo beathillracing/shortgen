@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     mobile_upload_chunk_size_mb: int = 8
     google_web_client_id: str = ""
     google_play_service_account_file: str = ""
+    firebase_credentials_file: str = "/var/www/shortgen/firebase_admin.json"
     google_play_package_name: str = "beathill.studio"
     google_play_subscription_product_id: str = "beathill_studio_pro"
     free_monthly_job_limit: int = 3

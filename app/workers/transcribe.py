@@ -152,6 +152,7 @@ def process_job(job_id: str):
         job.error_message = str(e)
         job.current_step = "error"
         db.commit()
+        _notify_push(db, job)
         raise
 
     finally:
@@ -195,6 +196,7 @@ def prepare_existing_thumbnail_selection(job_id: str):
             job.error_message = str(exc)
             job.current_step = "error"
             db.commit()
+            _notify_push(db, job)
         raise
     finally:
         db.close()
@@ -312,6 +314,7 @@ def continue_processing(job_id: str, selected_thumbnail_index: int = 1, thumbnai
         job.error_message = str(e)
         job.current_step = "error"
         db.commit()
+        _notify_push(db, job)
         raise
 
     finally:
@@ -325,3 +328,13 @@ def update_job_status(db, job, status, step, percent=None):
     db.commit()
     if percent is not None:
         set_progress(str(job.id), percent, step)
+    if status in ("thumbnail_selection", "review", "completed"):
+        _notify_push(db, job)
+
+
+def _notify_push(db, job):
+    try:
+        from app.services.push import notify_job
+        notify_job(db, job)
+    except Exception:
+        pass
