@@ -33,6 +33,15 @@ def public_delete_account_page(request: Request):
     return templates.TemplateResponse("public_delete.html", {"request": request})
 
 
+@router.get("/public/beathill-studio-v10.apk")
+def public_beathill_studio_apk():
+    return FileResponse(
+        "/var/www/shortgen/assets/public/beathill-studio-v10.apk",
+        media_type="application/vnd.android.package-archive",
+        filename="beathill-studio-v10.apk",
+    )
+
+
 @router.get("/public/shortgen-logo-1024.png")
 def public_logo():
     return FileResponse(
