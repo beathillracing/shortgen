@@ -333,6 +333,7 @@ fun DistributionAccountSection(
             when (status.plan) {
                 "pro" -> "Beathill Studio Pro"
                 "unlimited" -> "Unlimited access"
+                "admin" -> "Administrator"
                 else -> "Beathill Studio Free"
             },
             color = MaterialTheme.colorScheme.primary,
