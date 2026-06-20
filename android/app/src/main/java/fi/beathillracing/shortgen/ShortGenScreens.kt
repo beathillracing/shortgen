@@ -582,6 +582,7 @@ private fun ReviewAndPublish(
     onOpenSettings: () -> Unit,
     onAction: (suspend () -> Unit) -> Unit,
 ) {
+    val context = LocalContext.current
     var language by remember { mutableStateOf("fi") }
     var titleFi by remember(job.summary.id) { mutableStateOf(job.titleFi) }
     var titleEn by remember(job.summary.id) { mutableStateOf(job.titleEn) }
@@ -724,18 +725,20 @@ private fun ReviewAndPublish(
         selected = thumbnail,
         onSelected = { thumbnail = it },
     )
-    Text("YouTube type", fontWeight = FontWeight.SemiBold)
-    ChoiceRow(
-        choices = listOf("short" to "Short", "video" to "Video"),
-        selected = contentType,
-        onSelected = { contentType = it },
-    )
-    if (youtube && contentType == "short") {
-        Text(
-            "YouTube can't set a Shorts thumbnail via API - set it in YouTube Studio after upload.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    if (youtube) {
+        Text("YouTube type", fontWeight = FontWeight.SemiBold)
+        ChoiceRow(
+            choices = listOf("short" to "Short", "video" to "Video"),
+            selected = contentType,
+            onSelected = { contentType = it },
         )
+        if (contentType == "short") {
+            Text(
+                "YouTube can't set a Shorts thumbnail via API - set it in YouTube Studio after upload.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 
     val selectedPlatforms = buildList {
@@ -757,15 +760,69 @@ private fun ReviewAndPublish(
 
     val publishState = job.publishStatus.optString("status", "idle")
     if (publishState != "idle") {
-        Text("Publishing: ${publishState.replace("_", " ")}")
+        val completed = job.publishStatus.optInt("completed", 0)
+        val total = job.publishStatus.optInt("total", 0)
+        val currentPlatform = job.publishStatus.optString("current_platform")
+        Text(
+            when {
+                publishState == "running" && currentPlatform.isNotBlank() ->
+                    "Publishing to ${platformLabel(currentPlatform)}"
+                else -> "Publishing: ${publishState.replace("_", " ")}"
+            },
+            fontWeight = FontWeight.SemiBold,
+        )
         if (publishState in setOf("queued", "running")) {
-            LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (total > 0) {
+                LinearProgressIndicator(
+                    progress = { completed.toFloat() / total.toFloat() },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "$completed of $total platforms completed",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            } else {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
+        }
+        val results = job.publishStatus.optJSONObject("results")
+        results?.keys()?.forEach { platform ->
+            val result = results.optJSONObject(platform) ?: return@forEach
+            val url = result.optString("url").takeIf { it.startsWith("http") }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    "${platformLabel(platform)}: ${result.optString("status", "completed").replace("_", " ")}",
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                if (url != null) {
+                    OutlinedButton(
+                        onClick = {
+                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                        },
+                    ) { Text("Open") }
+                }
+            }
         }
         val errors = job.publishStatus.optJSONObject("errors")
-        if (errors != null && errors.length() > 0) {
-            Text(errors.toString(), color = MaterialTheme.colorScheme.error)
+        errors?.keys()?.forEach { platform ->
+            Text(
+                "${platformLabel(platform)}: ${errors.optString(platform, "Publishing failed")}",
+                color = MaterialTheme.colorScheme.error,
+            )
         }
     }
+}
+
+private fun platformLabel(platform: String): String = when (platform) {
+    "youtube" -> "YouTube"
+    "instagram" -> "Instagram"
+    "facebook" -> "Facebook"
+    "tiktok" -> "TikTok"
+    else -> platform.replaceFirstChar { it.uppercase() }
 }
 
 @Composable
