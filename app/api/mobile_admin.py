@@ -129,7 +129,7 @@ def update_mobile_account(data: dict, db: Session = Depends(get_db)):
         except (TypeError, ValueError) as exc:
             raise HTTPException(400, "Monthly limit must be a positive number") from exc
 
-    account.subscription_status = "admin_unlimited" if unlimited else "free"
+    account.admin_unlimited = unlimited
     account.publishing_enabled = publishing
     account.monthly_job_limit = monthly_limit
     db.commit()
@@ -139,7 +139,7 @@ def update_mobile_account(data: dict, db: Session = Depends(get_db)):
 @router.delete("/mobile-access/{email}")
 def revoke_mobile_account(email: str, db: Session = Depends(get_db)):
     account = _account_by_email(db, email)
-    account.subscription_status = "free"
+    account.admin_unlimited = False
     account.publishing_enabled = False
     account.monthly_job_limit = None
     db.commit()

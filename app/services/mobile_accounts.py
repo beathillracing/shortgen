@@ -42,11 +42,13 @@ def account_record(db: Session, account_id: str) -> MobileAccess:
 def entitlement(db: Session, account_id: str) -> dict:
     account = account_record(db, account_id)
     now = utcnow()
+    admin_unlimited = bool(account.admin_unlimited) or (
+        account.subscription_status == "admin_unlimited"
+    )
     active = (
-        account.subscription_status in {"active", "grace", "admin_unlimited"}
+        admin_unlimited
+        or account.subscription_status in {"active", "grace"}
         and (
-            account.subscription_status == "admin_unlimited"
-            or
             (account.subscription_expires_at and account.subscription_expires_at > now)
             or (account.subscription_grace_until and account.subscription_grace_until > now)
         )
@@ -67,7 +69,7 @@ def entitlement(db: Session, account_id: str) -> dict:
         "email": account.email,
         "display_name": account.display_name,
         "google_linked": bool(account.google_subject),
-        "plan": "unlimited" if account.subscription_status == "admin_unlimited"
+        "plan": "unlimited" if admin_unlimited
         else "pro" if active else "free",
         "subscription_status": account.subscription_status,
         "subscription_expires_at": (
@@ -231,7 +233,7 @@ def refresh_subscription_if_due(
     max_age: timedelta = timedelta(hours=6),
 ) -> dict:
     account = account_record(db, account_id)
-    if account.subscription_status == "admin_unlimited":
+    if account.admin_unlimited or account.subscription_status == "admin_unlimited":
         return entitlement(db, account_id)
     if not account.subscription_purchase_token_encrypted:
         return entitlement(db, account_id)

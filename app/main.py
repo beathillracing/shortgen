@@ -76,6 +76,7 @@ def ensure_mobile_access_columns():
             "google_subject": "VARCHAR(255)",
             "email": "VARCHAR(255)",
             "display_name": "VARCHAR(255)",
+            "admin_unlimited": "BOOLEAN DEFAULT FALSE NOT NULL",
             "subscription_status": "VARCHAR(30) DEFAULT 'free' NOT NULL",
             "subscription_product_id": "VARCHAR(100)",
             "subscription_purchase_token_hash": "VARCHAR(64)",
@@ -89,6 +90,12 @@ def ensure_mobile_access_columns():
         for name, ddl in columns.items():
             conn.execute(text(f"ALTER TABLE mobile_access ADD COLUMN IF NOT EXISTS {name} {ddl}"))
         conn.execute(text("UPDATE mobile_access SET account_id = owner WHERE account_id IS NULL"))
+        conn.execute(
+            text(
+                "UPDATE mobile_access SET admin_unlimited = TRUE, subscription_status = 'free' "
+                "WHERE subscription_status = 'admin_unlimited'"
+            )
+        )
         conn.execute(
             text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS ix_mobile_access_installation_id "

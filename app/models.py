@@ -148,6 +148,7 @@ class MobileAccess(Base):
     google_subject = Column(String(255), unique=True, index=True)
     email = Column(String(255), index=True)
     display_name = Column(String(255))
+    admin_unlimited = Column(Boolean, default=False, nullable=False)
     subscription_status = Column(String(30), default="free", nullable=False)
     subscription_product_id = Column(String(100))
     subscription_purchase_token_hash = Column(String(64), unique=True)
