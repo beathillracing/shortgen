@@ -4,8 +4,6 @@ import android.app.Activity
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,6 +27,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -42,9 +46,9 @@ import com.android.billingclient.api.ProductDetails
 import com.android.billingclient.api.Purchase
 import com.android.billingclient.api.QueryProductDetailsParams
 import com.android.billingclient.api.QueryPurchasesParams
-import com.google.android.gms.auth.api.signin.GoogleSignIn
-import com.google.android.gms.auth.api.signin.GoogleSignInOptions
-import com.google.android.gms.common.api.ApiException
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
@@ -73,6 +77,7 @@ fun DistributionAccountSection(
     val activity = context as Activity
     val scope = rememberCoroutineScope()
     val api = remember(server, token) { ShortGenApi(server, token) }
+    val credentialManager = remember { CredentialManager.create(context) }
     var account by remember { mutableStateOf<AccountStatus?>(null) }
     var connections by remember { mutableStateOf<Map<String, PlatformConnection>>(emptyMap()) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -219,14 +224,6 @@ fun DistributionAccountSection(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    val googleOptions = remember {
-        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
-            .requestEmail()
-            .requestIdToken(BuildConfig.GOOGLE_WEB_CLIENT_ID)
-            .build()
-    }
-    val googleClient = remember { GoogleSignIn.getClient(context, googleOptions) }
-
     fun linkGoogleCredential(credential: String) {
         scope.launch {
             runCatching { api.linkGoogle(credential) }
@@ -263,26 +260,66 @@ fun DistributionAccountSection(
         }
     }
 
-    val googleLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult(),
-    ) { result ->
-        val credential = runCatching {
-            GoogleSignIn.getSignedInAccountFromIntent(result.data)
-                .getResult(ApiException::class.java)
-                .idToken ?: error("Google did not return an ID token")
+    suspend fun requestGoogleCredential(
+        explicit: Boolean,
+        authorizedOnly: Boolean = false,
+        autoSelect: Boolean = false,
+    ): String {
+        val option = if (explicit) {
+            GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_WEB_CLIENT_ID).build()
+        } else {
+            GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(authorizedOnly)
+                .setAutoSelectEnabled(autoSelect)
+                .setServerClientId(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+                .build()
         }
-        credential.onSuccess {
-            if (addingAccount) addGoogleAccount(it) else linkGoogleCredential(it)
+        val request = GetCredentialRequest.Builder()
+            .addCredentialOption(option)
+            .build()
+        val credential = credentialManager.getCredential(activity, request).credential
+        if (
+            credential !is CustomCredential ||
+            credential.type !in setOf(
+                GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL,
+                GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_SIWG_CREDENTIAL,
+            )
+        ) {
+            error("Google did not return an ID token")
         }
-            .onFailure {
-                addingAccount = false
-                error = it.message
-            }
+        return GoogleIdTokenCredential.createFrom(credential.data).idToken
     }
-    LaunchedEffect(api, googleClient, account?.googleLinked) {
+
+    fun startGoogleSignIn(addAccount: Boolean) {
+        addingAccount = addAccount
+        scope.launch {
+            runCatching { requestGoogleCredential(explicit = true) }
+                .onSuccess {
+                    if (addAccount) addGoogleAccount(it) else linkGoogleCredential(it)
+                }
+                .onFailure {
+                    addingAccount = false
+                    if (it !is GetCredentialCancellationException) {
+                        error = it.message
+                    }
+                }
+        }
+    }
+
+    LaunchedEffect(api, account?.googleLinked) {
         if (account?.googleLinked == false) {
-            googleClient.silentSignIn().addOnSuccessListener { signedIn ->
-                signedIn.idToken?.let(::linkGoogleCredential)
+            try {
+                linkGoogleCredential(
+                    requestGoogleCredential(
+                        explicit = false,
+                        authorizedOnly = true,
+                        autoSelect = true,
+                    ),
+                )
+            } catch (_: NoCredentialException) {
+                // The explicit button remains available for first-time sign-in.
+            } catch (exc: GetCredentialException) {
+                error = exc.message
             }
         }
     }
@@ -307,7 +344,7 @@ fun DistributionAccountSection(
 
         if (!status.googleLinked) {
             OutlinedButton(
-                onClick = { googleLauncher.launch(googleClient.signInIntent) },
+                onClick = { startGoogleSignIn(addAccount = false) },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Link Google account") }
         } else {
@@ -334,12 +371,7 @@ fun DistributionAccountSection(
                 }
             }
             OutlinedButton(
-                onClick = {
-                    addingAccount = true
-                    googleClient.signOut().addOnCompleteListener {
-                        googleLauncher.launch(googleClient.signInIntent)
-                    }
-                },
+                onClick = { startGoogleSignIn(addAccount = true) },
                 enabled = !addingAccount,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(if (addingAccount) "Opening Google..." else "Add Google account") }

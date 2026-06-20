@@ -100,7 +100,9 @@ dependencies {
     implementation("androidx.media3:media3-ui:1.6.1")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     "playImplementation"("com.android.billingclient:billing:9.1.0")
-    "playImplementation"("com.google.android.gms:play-services-auth:21.4.0")
+    "playImplementation"("androidx.credentials:credentials:1.6.0")
+    "playImplementation"("androidx.credentials:credentials-play-services-auth:1.6.0")
+    "playImplementation"("com.google.android.libraries.identity.googleid:googleid:1.2.0")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
