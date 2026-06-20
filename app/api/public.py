@@ -28,6 +28,11 @@ def public_terms_page(request: Request):
     return templates.TemplateResponse("public_terms.html", {"request": request})
 
 
+@router.get("/public/delete-account", response_class=HTMLResponse)
+def public_delete_account_page(request: Request):
+    return templates.TemplateResponse("public_delete.html", {"request": request})
+
+
 @router.get("/public/shortgen-logo-1024.png")
 def public_logo():
     return FileResponse(
