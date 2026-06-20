@@ -16,6 +16,8 @@ class Settings(BaseSettings):
     meta_configuration_id: str = ""
     meta_graph_version: str = "v25.0"
     meta_page_id: str = ""
+    instagram_app_id: str = ""
+    instagram_app_secret: str = ""
     tiktok_client_key: str = ""
     tiktok_client_secret: str = ""
     tiktok_post_mode: str = "draft"

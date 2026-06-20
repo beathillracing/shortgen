@@ -135,6 +135,10 @@ private fun ShortGenApp(
                     selectedJobId = null
                     tab = AppTab.Jobs
                 },
+                onOpenSettings = {
+                    selectedJobId = null
+                    tab = AppTab.Settings
+                },
             )
 
             tab == AppTab.Upload -> UploadScreen(

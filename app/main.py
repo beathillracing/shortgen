@@ -126,7 +126,16 @@ async def auth_middleware(request: Request, call_next):
         return await call_next(request)
 
     # Allow OAuth callbacks and signed public media fetches without admin auth.
-    if request.url.path in ["/api/youtube/callback", "/api/meta/callback", "/api/tiktok/callback"]:
+    if request.url.path in [
+        "/api/youtube/callback",
+        "/api/meta/callback",
+        "/api/instagram/callback",
+        "/api/instagram/deauthorize",
+        "/api/instagram/data-deletion",
+        "/api/tiktok/callback",
+    ]:
+        return await call_next(request)
+    if request.url.path.startswith("/api/instagram/data-deletion/"):
         return await call_next(request)
     if request.url.path.startswith("/public/"):
         return await call_next(request)

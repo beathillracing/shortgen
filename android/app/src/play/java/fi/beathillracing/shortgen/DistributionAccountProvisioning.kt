@@ -49,7 +49,7 @@ fun DistributionAccountProvisioning(
     }
 }
 
-private suspend fun registerInstallation(
+internal suspend fun registerInstallation(
     server: String,
     installationId: String,
     accessToken: String,
@@ -74,7 +74,7 @@ private suspend fun registerInstallation(
         }
 }
 
-private fun newAccessToken(): String {
+internal fun newAccessToken(): String {
     val bytes = ByteArray(32)
     SecureRandom().nextBytes(bytes)
     return "bst_" + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)

@@ -399,12 +399,14 @@ fun JobDetailScreen(
     api: ShortGenApi,
     jobId: String,
     onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     var job by remember { mutableStateOf<JobDetail?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var refreshKey by remember { mutableStateOf(0) }
     var busy by remember { mutableStateOf(false) }
+    var connections by remember { mutableStateOf<Map<String, PlatformConnection>>(emptyMap()) }
 
     LaunchedEffect(jobId, refreshKey) {
         while (true) {
@@ -415,6 +417,11 @@ fun JobDetailScreen(
                 }
                 .onFailure { error = it.message }
                 .getOrNull()
+            if (current?.publishingEnabled == true && connections.isEmpty()) {
+                runCatching { api.getConnections() }
+                    .onSuccess { connections = it }
+                    .onFailure { error = it.message }
+            }
             val status = current?.summary?.status
             val publishState = current?.publishStatus?.optString("status", "idle") ?: "idle"
             val publishing = publishState == "queued" || publishState == "running"
@@ -449,20 +456,31 @@ fun JobDetailScreen(
                 modifier = Modifier.padding(16.dp),
             )
             job == null -> LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            else -> JobContent(
-                job = job!!,
-                api = api,
-                busy = busy,
-                onAction = { action ->
-                    busy = true
-                    scope.launch {
-                        runCatching { action() }
-                            .onFailure { error = it.message }
-                        busy = false
-                        refreshKey += 1
-                    }
-                },
-            )
+            else -> {
+                error?.let {
+                    Text(
+                        it,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+                JobContent(
+                    job = job!!,
+                    api = api,
+                    busy = busy,
+                    connections = connections,
+                    onOpenSettings = onOpenSettings,
+                    onAction = { action ->
+                        busy = true
+                        scope.launch {
+                            runCatching { action() }
+                                .onFailure { error = it.message }
+                            busy = false
+                            refreshKey += 1
+                        }
+                    },
+                )
+            }
         }
     }
 }
@@ -472,6 +490,8 @@ private fun JobContent(
     job: JobDetail,
     api: ShortGenApi,
     busy: Boolean,
+    connections: Map<String, PlatformConnection>,
+    onOpenSettings: () -> Unit,
     onAction: (suspend () -> Unit) -> Unit,
 ) {
     Column(
@@ -498,6 +518,8 @@ private fun JobContent(
                 job = job,
                 api = api,
                 busy = busy,
+                connections = connections,
+                onOpenSettings = onOpenSettings,
                 onAction = onAction,
             )
             "failed" -> Text(
@@ -553,6 +575,8 @@ private fun ReviewAndPublish(
     job: JobDetail,
     api: ShortGenApi,
     busy: Boolean,
+    connections: Map<String, PlatformConnection>,
+    onOpenSettings: () -> Unit,
     onAction: (suspend () -> Unit) -> Unit,
 ) {
     var language by remember { mutableStateOf("fi") }
@@ -656,10 +680,40 @@ private fun ReviewAndPublish(
 
     HorizontalDivider()
     Text("Publish", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-    PlatformRow("YouTube", youtube, job.posted.youtube) { youtube = it }
-    PlatformRow("Instagram", instagram, job.posted.instagram) { instagram = it }
-    PlatformRow("Facebook", facebook, job.posted.facebook) { facebook = it }
-    PlatformRow("TikTok draft", tiktok, job.posted.tiktok) { tiktok = it }
+    val youtubeConnection = connections["youtube"]
+    val facebookConnection = connections["facebook"]
+    val instagramConnection = connections["instagram"]
+    val tiktokConnection = connections["tiktok"]
+    PlatformRow(
+        label = "YouTube",
+        selected = youtube,
+        posted = job.posted.youtube,
+        connection = youtubeConnection,
+    ) { youtube = it }
+    PlatformRow(
+        label = "Instagram",
+        selected = instagram,
+        posted = job.posted.instagram,
+        connection = instagramConnection,
+    ) { instagram = it }
+    PlatformRow(
+        label = "Facebook",
+        selected = facebook,
+        posted = job.posted.facebook,
+        connection = facebookConnection,
+    ) { facebook = it }
+    PlatformRow(
+        label = "TikTok draft",
+        selected = tiktok,
+        posted = job.posted.tiktok,
+        connection = tiktokConnection,
+    ) { tiktok = it }
+    if (connections.isEmpty() || connections.values.any { !it.connected }) {
+        OutlinedButton(
+            onClick = onOpenSettings,
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Manage publishing accounts") }
+    }
 
     Text("Thumbnail / cover", fontWeight = FontWeight.SemiBold)
     ChoiceRow(
@@ -870,13 +924,29 @@ private fun AuthVideo(api: ShortGenApi, path: String) {
 }
 
 @Composable
-private fun PlatformRow(label: String, selected: Boolean, posted: Boolean, onChange: (Boolean) -> Unit) {
+private fun PlatformRow(
+    label: String,
+    selected: Boolean,
+    posted: Boolean,
+    connection: PlatformConnection?,
+    available: Boolean = connection?.connected == true,
+    onChange: (Boolean) -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Checkbox(checked = selected, onCheckedChange = onChange, enabled = !posted)
-        Text(if (posted) "$label (posted)" else label)
+        Checkbox(
+            checked = selected,
+            onCheckedChange = onChange,
+            enabled = !posted && available,
+        )
+        val suffix = when {
+            posted -> "posted"
+            available -> connection?.label ?: "connected"
+            else -> "not connected"
+        }
+        Text("$label ($suffix)")
     }
 }
 

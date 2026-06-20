@@ -1,3 +1,9 @@
+import base64
+import hashlib
+import hmac
+import json
+import secrets
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -23,6 +29,49 @@ def _mobile_oauth_complete(provider: str) -> HTMLResponse:
         f"<h1>{provider} connected</h1>"
         "<p>You can close this page and return to Beathill Studio.</p></main>"
     )
+
+
+def _instagram_signed_request(value: str) -> dict:
+    try:
+        signature_text, payload_text = value.split(".", 1)
+        signature = base64.urlsafe_b64decode(signature_text + "=" * (-len(signature_text) % 4))
+        expected = hmac.new(
+            settings.instagram_app_secret.encode(),
+            payload_text.encode(),
+            hashlib.sha256,
+        ).digest()
+        if not hmac.compare_digest(signature, expected):
+            raise ValueError
+        payload = base64.urlsafe_b64decode(
+            payload_text + "=" * (-len(payload_text) % 4)
+        )
+        return json.loads(payload)
+    except Exception as exc:
+        raise HTTPException(400, "Invalid Instagram signed request") from exc
+
+
+def _deletion_confirmation(user_id: str) -> str:
+    payload = f"{user_id}:{int(time.time())}:{secrets.token_urlsafe(12)}"
+    signature = hmac.new(
+        settings.secret_key.encode(),
+        payload.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    return base64.urlsafe_b64encode(f"{payload}:{signature}".encode()).decode().rstrip("=")
+
+
+def _verify_deletion_confirmation(value: str) -> bool:
+    try:
+        decoded = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)).decode()
+        payload, signature = decoded.rsplit(":", 1)
+        expected = hmac.new(
+            settings.secret_key.encode(),
+            payload.encode(),
+            hashlib.sha256,
+        ).hexdigest()
+        return hmac.compare_digest(signature, expected)
+    except Exception:
+        return False
 
 
 def _job_or_404(job_id: str, db: Session) -> Job:
@@ -102,6 +151,58 @@ def meta_callback(request: Request, db: Session = Depends(get_db)):
     except Exception as exc:
         raise HTTPException(400, f"Meta OAuth failed: {exc}") from exc
     return RedirectResponse("/?meta=connected")
+
+
+@router.get("/instagram/callback")
+def instagram_callback(request: Request, db: Session = Depends(get_db)):
+    if error := request.query_params.get("error_description"):
+        raise HTTPException(400, error)
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    if not code or not state:
+        raise HTTPException(400, "Missing Instagram OAuth response")
+    try:
+        if mobile_oauth.handle_instagram_callback(db, code, state):
+            return _mobile_oauth_complete("Instagram")
+    except Exception as exc:
+        raise HTTPException(400, f"Instagram OAuth failed: {exc}") from exc
+    raise HTTPException(400, "Invalid or expired Instagram OAuth state")
+
+
+@router.post("/instagram/deauthorize")
+async def instagram_deauthorize(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    payload = _instagram_signed_request(str(form.get("signed_request") or ""))
+    mobile_oauth.disconnect_provider_user(db, "instagram", str(payload.get("user_id") or ""))
+    return {"success": True}
+
+
+@router.post("/instagram/data-deletion")
+async def instagram_data_deletion(request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    payload = _instagram_signed_request(str(form.get("signed_request") or ""))
+    mobile_oauth.disconnect_provider_user(db, "instagram", str(payload.get("user_id") or ""))
+    confirmation_code = _deletion_confirmation(str(payload.get("user_id") or "unknown"))
+    return {
+        "url": (
+            f"{settings.base_url.rstrip('/')}/api/instagram/data-deletion/"
+            f"{confirmation_code}"
+        ),
+        "confirmation_code": confirmation_code,
+    }
+
+
+@router.get("/instagram/data-deletion/{confirmation_code}")
+def instagram_data_deletion_status(confirmation_code: str):
+    if not _verify_deletion_confirmation(confirmation_code):
+        raise HTTPException(404, "Deletion request not found")
+    return HTMLResponse(
+        "<!doctype html><meta name='viewport' content='width=device-width'>"
+        "<title>Data deletion status</title>"
+        "<main style='font:16px system-ui;text-align:center;padding:48px 20px'>"
+        "<h1>Instagram data deleted</h1>"
+        f"<p>Confirmation code: {confirmation_code}</p></main>"
+    )
 
 
 @router.get("/meta/pages")

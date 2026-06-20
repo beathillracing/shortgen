@@ -2,7 +2,7 @@ from pathlib import Path
 
 from app.database import SessionLocal
 from app.models import Job
-from app.services import meta, tiktok, youtube
+from app.services import instagram, meta, tiktok, youtube
 from app.services.mobile_accounts import entitlement, refresh_subscription_if_due
 from app.services.mobile_oauth import connection_data
 from app.services.public_media import media_url
@@ -105,12 +105,18 @@ def _publish_instagram(db, job: Job, options: dict) -> dict:
     _prepare_video(job, thumbnail_path, prepend_thumbnail=True)
     db.commit()
 
-    result = meta.upload_instagram_reel(
-        video_url=media_url(str(job.id), "video"),
-        cover_url=media_url(str(job.id), _thumbnail_kind(options["thumbnail"])),
-        caption=_caption(job, options["language"], 2200),
-        connection_data=_credentials(db, job, "meta"),
-    )
+    upload_args = {
+        "video_url": media_url(str(job.id), "video"),
+        "cover_url": media_url(str(job.id), _thumbnail_kind(options["thumbnail"])),
+        "caption": _caption(job, options["language"], 2200),
+    }
+    if job.mobile_owner:
+        result = instagram.upload_reel(
+            **upload_args,
+            connection_data=_credentials(db, job, "instagram"),
+        )
+    else:
+        result = meta.upload_instagram_reel(**upload_args)
     job.instagram_media_id = result["media_id"]
     job.instagram_url = result.get("url")
     job.instagram_status = result.get("status") or "uploaded"
@@ -130,7 +136,7 @@ def _publish_facebook(db, job: Job, options: dict) -> dict:
         video_url=media_url(str(job.id), "video"),
         description=_caption(job, options["language"], 5000),
         thumbnail_path=thumbnail_path,
-        connection_data=_credentials(db, job, "meta"),
+        connection_data=_credentials(db, job, "facebook"),
     )
     job.facebook_video_id = result["video_id"]
     job.facebook_url = result.get("url")

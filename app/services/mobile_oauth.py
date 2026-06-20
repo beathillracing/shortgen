@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import MobileAccess, OAuthConnection, OAuthState
-from app.services import meta, tiktok, youtube
+from app.services import instagram, meta, tiktok, youtube
 from app.services.secure_data import decrypt_json, encrypt_json
 
 
@@ -23,7 +23,7 @@ def canonical_access(db: Session, account_id: str) -> MobileAccess:
 
 def connection(db: Session, account_id: str, provider: str) -> OAuthConnection | None:
     account = canonical_access(db, account_id)
-    return (
+    item = (
         db.query(OAuthConnection)
         .filter(
             OAuthConnection.mobile_access_id == account.id,
@@ -31,6 +31,19 @@ def connection(db: Session, account_id: str, provider: str) -> OAuthConnection |
         )
         .first()
     )
+    if not item and provider == "facebook":
+        item = (
+            db.query(OAuthConnection)
+            .filter(
+                OAuthConnection.mobile_access_id == account.id,
+                OAuthConnection.provider == "meta",
+            )
+            .first()
+        )
+        if item:
+            item.provider = "facebook"
+            db.commit()
+    return item
 
 
 def connection_data(db: Session, account_id: str, provider: str) -> dict:
@@ -42,12 +55,23 @@ def connection_data(db: Session, account_id: str, provider: str) -> dict:
 
 def connection_statuses(db: Session, account_id: str) -> dict:
     result = {}
-    for provider in ("youtube", "meta", "tiktok"):
+    for provider in ("youtube", "facebook", "instagram", "tiktok"):
         item = connection(db, account_id, provider)
+        metadata = dict(item.metadata_json or {}) if item else {}
+        if item and provider == "facebook":
+            data = decrypt_json(item.encrypted_credentials)
+            metadata["selected_page_id"] = data.get("selected_page_id")
+            metadata["pages"] = [
+                {
+                    "id": page.get("id"),
+                    "name": page.get("name"),
+                }
+                for page in data.get("pages", [])
+            ]
         result[provider] = {
             "connected": bool(item),
             "label": item.account_label if item else None,
-            "metadata": item.metadata_json if item else {},
+            "metadata": metadata,
         }
     return result
 
@@ -108,8 +132,10 @@ def authorization_url(db: Session, account_id: str, provider: str) -> str:
             prompt="consent",
         )
         return url
-    if provider == "meta":
+    if provider == "facebook":
         return meta.get_auth_url(state=state, persist_state=False)
+    if provider == "instagram":
+        return instagram.get_auth_url(state)
     if provider == "tiktok":
         return tiktok.get_auth_url(state=state, persist_state=False)
     raise ValueError("Unknown platform")
@@ -163,7 +189,7 @@ def handle_youtube_callback(db: Session, code: str, state: str) -> bool:
 
 
 def handle_meta_callback(db: Session, code: str, state: str) -> bool:
-    resolved = _state_record(db, state, "meta")
+    resolved = _state_record(db, state, "facebook")
     if not resolved:
         return False
     state_record, account = resolved
@@ -174,7 +200,31 @@ def handle_meta_callback(db: Session, code: str, state: str) -> bool:
         "page_name": data.get("selected_page_name"),
         "instagram_username": data.get("instagram_username"),
     }
-    _save(db, account, "meta", data, label, metadata)
+    _save(db, account, "facebook", data, label, metadata)
+    _finish_state(db, state_record)
+    return True
+
+
+def handle_instagram_callback(db: Session, code: str, state: str) -> bool:
+    resolved = _state_record(db, state, "instagram")
+    if not resolved:
+        return False
+    state_record, account = resolved
+    data = instagram.exchange_code(code)
+    profile = instagram.get_profile(data)
+    data["user_id"] = profile.get("user_id") or profile.get("id") or data.get("user_id")
+    label = profile.get("username") or profile.get("name") or "Instagram"
+    _save(
+        db,
+        account,
+        "instagram",
+        data,
+        label,
+        {
+            "username": profile.get("username"),
+            "account_type": profile.get("account_type"),
+        },
+    )
     _finish_state(db, state_record)
     return True
 
@@ -197,3 +247,45 @@ def disconnect(db: Session, account_id: str, provider: str):
     if item:
         db.delete(item)
         db.commit()
+
+
+def disconnect_provider_user(db: Session, provider: str, provider_user_id: str) -> bool:
+    items = db.query(OAuthConnection).filter(OAuthConnection.provider == provider).all()
+    for item in items:
+        try:
+            data = decrypt_json(item.encrypted_credentials)
+        except Exception:
+            continue
+        if str(data.get("user_id") or "") == str(provider_user_id):
+            db.delete(item)
+            db.commit()
+            return True
+    return False
+
+
+def select_facebook_page(db: Session, account_id: str, page_id: str):
+    item = connection(db, account_id, "facebook")
+    if not item:
+        raise ValueError("Facebook is not connected")
+    data = decrypt_json(item.encrypted_credentials)
+    page = next(
+        (candidate for candidate in data.get("pages", []) if candidate.get("id") == page_id),
+        None,
+    )
+    if not page:
+        raise ValueError("Facebook Page is not available for this Meta account")
+    data.update(meta._selected_page_payload(page))
+    metadata = {
+        "page_id": data.get("selected_page_id"),
+        "page_name": data.get("selected_page_name"),
+        "instagram_username": data.get("instagram_username"),
+    }
+    account = canonical_access(db, account_id)
+    _save(
+        db,
+        account,
+        "facebook",
+        data,
+        data.get("selected_page_name") or "Meta",
+        metadata,
+    )

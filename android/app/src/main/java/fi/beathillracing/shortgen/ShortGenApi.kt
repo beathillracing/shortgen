@@ -54,6 +54,7 @@ data class AccountUsage(
 )
 
 data class AccountStatus(
+    val accountId: String,
     val plan: String,
     val subscriptionStatus: String,
     val email: String?,
@@ -66,6 +67,13 @@ data class AccountStatus(
 data class PlatformConnection(
     val connected: Boolean,
     val label: String?,
+    val selectedId: String?,
+    val options: List<PlatformOption>,
+)
+
+data class PlatformOption(
+    val id: String,
+    val label: String,
 )
 
 data class JobDetail(
@@ -149,9 +157,22 @@ class ShortGenApi(
             val items = root.getJSONObject("connections")
             items.keys().asSequence().associateWith { provider ->
                 val item = items.getJSONObject(provider)
+                val metadata = item.optJSONObject("metadata") ?: JSONObject()
                 PlatformConnection(
                     connected = item.optBoolean("connected"),
                     label = item.nullableString("label"),
+                    selectedId = metadata.nullableString("selected_page_id"),
+                    options = metadata.optJSONArray("pages")
+                        ?.objects()
+                        ?.mapNotNull { page ->
+                            val id = page.nullableString("id") ?: return@mapNotNull null
+                            val name = page.nullableString("name") ?: "Facebook Page"
+                            PlatformOption(
+                                id = id,
+                                label = name,
+                            )
+                        }
+                        .orEmpty(),
                 )
             }
         }
@@ -163,6 +184,14 @@ class ShortGenApi(
 
     suspend fun disconnect(provider: String) = withContext(Dispatchers.IO) {
         requestJson("DELETE", "/api/mobile/connections/$provider")
+    }
+
+    suspend fun selectFacebookPage(pageId: String) = withContext(Dispatchers.IO) {
+        requestJson(
+            "POST",
+            "/api/mobile/connections/facebook/page",
+            JSONObject().put("page_id", pageId),
+        )
     }
 
     suspend fun verifySubscription(purchaseToken: String): AccountStatus =
@@ -298,6 +327,7 @@ class ShortGenApi(
     private fun parseAccount(item: JSONObject): AccountStatus {
         val usage = item.optJSONObject("usage") ?: JSONObject()
         return AccountStatus(
+            accountId = item.optString("account_id"),
             plan = item.optString("plan", "free"),
             subscriptionStatus = item.optString("subscription_status", "free"),
             email = item.nullableString("email"),

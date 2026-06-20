@@ -30,6 +30,7 @@ from app.services.mobile_oauth import (
     authorization_url,
     connection_statuses,
     disconnect as disconnect_oauth,
+    select_facebook_page,
 )
 from app.database import SessionLocal
 from redis import Redis
@@ -313,7 +314,7 @@ def mobile_connection_auth(
     db: Session = Depends(get_db),
 ):
     _require_mobile_publishing(db, identity)
-    if provider not in {"youtube", "meta", "tiktok"}:
+    if provider not in {"youtube", "facebook", "instagram", "tiktok"}:
         raise HTTPException(404, "Unknown publishing platform")
     try:
         url = authorization_url(db, identity["owner"], provider)
@@ -331,10 +332,27 @@ def mobile_connection_disconnect(
     db: Session = Depends(get_db),
 ):
     _require_mobile_publishing(db, identity)
-    if provider not in {"youtube", "meta", "tiktok"}:
+    if provider not in {"youtube", "facebook", "instagram", "tiktok"}:
         raise HTTPException(404, "Unknown publishing platform")
     disconnect_oauth(db, identity["owner"], provider)
     return {"status": "disconnected"}
+
+
+@router.post("/connections/facebook/page")
+def mobile_connection_facebook_page(
+    data: dict,
+    identity: dict = Depends(_mobile_identity),
+    db: Session = Depends(get_db),
+):
+    _require_mobile_publishing(db, identity)
+    page_id = str(data.get("page_id") or "")
+    if not page_id:
+        raise HTTPException(400, "Facebook Page is required")
+    try:
+        select_facebook_page(db, identity["owner"], page_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {"connections": connection_statuses(db, identity["owner"])}
 
 
 @router.post("/billing/verify")
@@ -547,8 +565,8 @@ def publish_mobile_job(
         statuses = connection_statuses(db, identity["owner"])
         required = {
             "youtube": "youtube",
-            "instagram": "meta",
-            "facebook": "meta",
+            "instagram": "instagram",
+            "facebook": "facebook",
             "tiktok": "tiktok",
         }
         missing = sorted(

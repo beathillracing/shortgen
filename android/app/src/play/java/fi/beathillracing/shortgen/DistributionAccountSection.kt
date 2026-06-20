@@ -46,8 +46,19 @@ import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 import com.google.android.gms.common.api.ApiException
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.UUID
 
 private const val PRO_PRODUCT_ID = "beathill_studio_pro"
+private const val SAVED_ACCOUNTS_KEY = "saved_google_accounts"
+
+private data class SavedAccount(
+    val accountId: String,
+    val label: String,
+    val email: String?,
+    val token: String,
+)
 
 @Composable
 fun DistributionAccountSection(
@@ -67,6 +78,23 @@ fun DistributionAccountSection(
     var error by remember { mutableStateOf<String?>(null) }
     var product by remember { mutableStateOf<ProductDetails?>(null) }
     var deleteConfirm by remember { mutableStateOf(false) }
+    var addingAccount by remember { mutableStateOf(false) }
+    var savedAccounts by remember {
+        mutableStateOf(loadSavedAccounts(preferences))
+    }
+
+    fun rememberAccount(status: AccountStatus, accountToken: String) {
+        if (!status.googleLinked || status.accountId.isBlank()) return
+        val saved = SavedAccount(
+            accountId = status.accountId,
+            label = status.displayName ?: status.email ?: "Google account",
+            email = status.email,
+            token = accountToken,
+        )
+        savedAccounts = (savedAccounts.filterNot { it.accountId == saved.accountId } + saved)
+            .sortedBy { it.label.lowercase() }
+        saveAccounts(preferences, savedAccounts)
+    }
 
     fun refresh() {
         scope.launch {
@@ -78,6 +106,7 @@ fun DistributionAccountSection(
                     } else {
                         emptyMap()
                     }
+                    rememberAccount(it, token)
                     error = null
                 }
                 .onFailure { error = it.message }
@@ -98,6 +127,14 @@ fun DistributionAccountSection(
     fun disconnect(provider: String) {
         scope.launch {
             runCatching { api.disconnect(provider) }
+                .onSuccess { refresh() }
+                .onFailure { error = it.message }
+        }
+    }
+
+    fun selectFacebookPage(pageId: String) {
+        scope.launch {
+            runCatching { api.selectFacebookPage(pageId) }
                 .onSuccess { refresh() }
                 .onFailure { error = it.message }
         }
@@ -195,10 +232,34 @@ fun DistributionAccountSection(
             runCatching { api.linkGoogle(credential) }
                 .onSuccess {
                     account = it
+                    rememberAccount(it, token)
                     error = null
                     refresh()
                 }
                 .onFailure { throwable -> error = throwable.message }
+        }
+    }
+
+    fun addGoogleAccount(credential: String) {
+        scope.launch {
+            val newToken = newAccessToken()
+            runCatching {
+                registerInstallation(
+                    server = server,
+                    installationId = UUID.randomUUID().toString(),
+                    accessToken = newToken,
+                )
+                ShortGenApi(server, newToken).linkGoogle(credential)
+            }.onSuccess { status ->
+                rememberAccount(status, newToken)
+                preferences.edit { putString(UploadWorker.KEY_TOKEN, newToken) }
+                addingAccount = false
+                error = null
+                onAccountChanged()
+            }.onFailure {
+                addingAccount = false
+                error = it.message
+            }
         }
     }
 
@@ -210,12 +271,19 @@ fun DistributionAccountSection(
                 .getResult(ApiException::class.java)
                 .idToken ?: error("Google did not return an ID token")
         }
-        credential.onSuccess(::linkGoogleCredential)
-            .onFailure { error = it.message }
+        credential.onSuccess {
+            if (addingAccount) addGoogleAccount(it) else linkGoogleCredential(it)
+        }
+            .onFailure {
+                addingAccount = false
+                error = it.message
+            }
     }
-    LaunchedEffect(api, googleClient) {
-        googleClient.silentSignIn().addOnSuccessListener { signedIn ->
-            signedIn.idToken?.let(::linkGoogleCredential)
+    LaunchedEffect(api, googleClient, account?.googleLinked) {
+        if (account?.googleLinked == false) {
+            googleClient.silentSignIn().addOnSuccessListener { signedIn ->
+                signedIn.idToken?.let(::linkGoogleCredential)
+            }
         }
     }
 
@@ -244,6 +312,37 @@ fun DistributionAccountSection(
             ) { Text("Link Google account") }
         } else {
             Text("Google account linked")
+            Text("Saved accounts", style = MaterialTheme.typography.titleSmall)
+            savedAccounts.forEach { saved ->
+                OutlinedButton(
+                    onClick = {
+                        preferences.edit {
+                            putString(UploadWorker.KEY_TOKEN, saved.token)
+                        }
+                        onAccountChanged()
+                    },
+                    enabled = saved.token != token,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (saved.token == token) {
+                            "${saved.label} (current)"
+                        } else {
+                            saved.label
+                        },
+                    )
+                }
+            }
+            OutlinedButton(
+                onClick = {
+                    addingAccount = true
+                    googleClient.signOut().addOnCompleteListener {
+                        googleLauncher.launch(googleClient.signInIntent)
+                    }
+                },
+                enabled = !addingAccount,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text(if (addingAccount) "Opening Google..." else "Add Google account") }
         }
 
         if (!status.publishingEnabled) {
@@ -277,10 +376,17 @@ fun DistributionAccountSection(
                 onDisconnect = { disconnect("youtube") },
             )
             PlatformConnectionRow(
-                label = "Facebook and Instagram",
-                connection = connections["meta"],
-                onConnect = { connect("meta") },
-                onDisconnect = { disconnect("meta") },
+                label = "Facebook",
+                connection = connections["facebook"],
+                onConnect = { connect("facebook") },
+                onDisconnect = { disconnect("facebook") },
+                onSelect = ::selectFacebookPage,
+            )
+            PlatformConnectionRow(
+                label = "Instagram",
+                connection = connections["instagram"],
+                onConnect = { connect("instagram") },
+                onDisconnect = { disconnect("instagram") },
             )
             PlatformConnectionRow(
                 label = "TikTok",
@@ -330,6 +436,13 @@ fun DistributionAccountSection(
                     scope.launch {
                         runCatching { api.deleteAccount() }
                             .onSuccess {
+                                val deletedAccountId = account?.accountId
+                                if (deletedAccountId != null) {
+                                    savedAccounts = savedAccounts.filterNot {
+                                        it.accountId == deletedAccountId
+                                    }
+                                    saveAccounts(preferences, savedAccounts)
+                                }
                                 preferences.edit {
                                     remove(UploadWorker.KEY_TOKEN)
                                     remove("installation_id")
@@ -350,12 +463,49 @@ fun DistributionAccountSection(
 
 private var billingClientPlaceholder: BillingClient? = null
 
+private fun loadSavedAccounts(preferences: SharedPreferences): List<SavedAccount> {
+    val raw = preferences.getString(SAVED_ACCOUNTS_KEY, null) ?: return emptyList()
+    return runCatching {
+        val items = JSONArray(raw)
+        (0 until items.length()).mapNotNull { index ->
+            val item = items.optJSONObject(index) ?: return@mapNotNull null
+            val accountId = item.optString("account_id")
+            val token = item.optString("token")
+            if (accountId.isBlank() || token.isBlank()) return@mapNotNull null
+            SavedAccount(
+                accountId = accountId,
+                label = item.optString("label", "Google account"),
+                email = item.optString("email").takeIf { it.isNotBlank() },
+                token = token,
+            )
+        }
+    }.getOrDefault(emptyList())
+}
+
+private fun saveAccounts(
+    preferences: SharedPreferences,
+    accounts: List<SavedAccount>,
+) {
+    val items = JSONArray()
+    accounts.forEach { account ->
+        items.put(
+            JSONObject()
+                .put("account_id", account.accountId)
+                .put("label", account.label)
+                .put("email", account.email ?: JSONObject.NULL)
+                .put("token", account.token),
+        )
+    }
+    preferences.edit { putString(SAVED_ACCOUNTS_KEY, items.toString()) }
+}
+
 @Composable
 private fun PlatformConnectionRow(
     label: String,
     connection: PlatformConnection?,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
+    onSelect: ((String) -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -371,6 +521,24 @@ private fun PlatformConnectionRow(
                 onClick = onDisconnect,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Disconnect") }
+            if (connection.options.size > 1 && onSelect != null) {
+                Text("Publishing destination")
+                connection.options.forEach { option ->
+                    OutlinedButton(
+                        onClick = { onSelect(option.id) },
+                        enabled = option.id != connection.selectedId,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            if (option.id == connection.selectedId) {
+                                "${option.label} (selected)"
+                            } else {
+                                option.label
+                            },
+                        )
+                    }
+                }
+            }
         } else {
             OutlinedButton(
                 onClick = onConnect,
