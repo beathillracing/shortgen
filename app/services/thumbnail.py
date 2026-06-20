@@ -4,11 +4,22 @@ from pathlib import Path
 from app.config import settings
 
 
+def _hex_to_rgb(hex_color):
+    h = (hex_color or "").lstrip("#")
+    if len(h) != 6:
+        return (76, 175, 80)
+    try:
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return (76, 175, 80)
+
+
 def add_text_to_thumbnail(
     input_path: str,
     output_path: str,
     text: str,
-    position: str = "bottom"
+    position: str = "bottom",
+    text_color: str = None,
 ) -> str:
     """
     Add text overlay to a thumbnail image. Supports multiple lines.
@@ -124,7 +135,7 @@ def add_text_to_thumbnail(
                     draw.text((x + dx, y + dy), line, font=font, fill=(0, 0, 0))
 
         # Draw green text (brand color)
-        draw.text((x, y), line, font=font, fill=(76, 175, 80))  # Green (#4CAF50)
+        draw.text((x, y), line, font=font, fill=_hex_to_rgb(text_color))  # default brand green
 
     # Save
     img.save(output_path, quality=95)
@@ -163,7 +174,8 @@ def create_thumbnail_variants(
     base_image_path: str,
     output_dir: Path,
     text_fi: str,
-    text_en: str
+    text_en: str,
+    text_color: str = None,
 ) -> dict:
     """
     Create thumbnail variants with Finnish and English text.
@@ -180,11 +192,11 @@ def create_thumbnail_variants(
 
     # Finnish thumbnail
     fi_path = str(output_dir / "thumbnail_fi.jpg")
-    add_text_to_thumbnail(vertical_base, fi_path, text_fi)
+    add_text_to_thumbnail(vertical_base, fi_path, text_fi, text_color=text_color)
 
     # English thumbnail
     en_path = str(output_dir / "thumbnail_en.jpg")
-    add_text_to_thumbnail(vertical_base, en_path, text_en)
+    add_text_to_thumbnail(vertical_base, en_path, text_en, text_color=text_color)
 
     # Also keep a clean version without text
     clean_path = str(output_dir / "thumbnail_clean.jpg")

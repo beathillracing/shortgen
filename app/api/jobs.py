@@ -148,6 +148,7 @@ def continue_job(job_id: str, data: dict, db: Session = Depends(get_db)):
     selected_index = data.get("thumbnail_index", 1)
     text_fi = data.get("text_fi")
     text_en = data.get("text_en")
+    thumbnail_text_color = data.get("thumbnail_text_color")
 
     # Update job status
     job.status = "processing"
@@ -157,6 +158,8 @@ def continue_job(job_id: str, data: dict, db: Session = Depends(get_db)):
         job.suggested_thumbnail_text_fi = text_fi
     if text_en:
         job.suggested_thumbnail_text_en = text_en
+    if thumbnail_text_color:
+        job.thumbnail_text_color = thumbnail_text_color
     db.commit()
 
     # Queue the continuation
@@ -316,13 +319,16 @@ def select_thumbnail(job_id: str, data: dict, db: Session = Depends(get_db)):
 
     job.suggested_thumbnail_text_fi = text_fi
     job.suggested_thumbnail_text_en = text_en
+    if data.get("thumbnail_text_color"):
+        job.thumbnail_text_color = data["thumbnail_text_color"]
 
     # Create new thumbnails from selected candidate
     thumb_paths = thumbnail.create_thumbnail_variants(
         candidate["path"],
         export_dir,
         text_fi,
-        text_en
+        text_en,
+        text_color=job.thumbnail_text_color,
     )
 
     job.thumbnail_path = thumb_paths["clean"]

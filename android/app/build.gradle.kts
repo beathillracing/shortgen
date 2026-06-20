@@ -21,8 +21,8 @@ android {
         applicationId = "fi.beathillracing.shortgen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 13
-        versionName = "0.10.3"
+        versionCode = 14
+        versionName = "0.10.4"
     }
 
     productFlavors {

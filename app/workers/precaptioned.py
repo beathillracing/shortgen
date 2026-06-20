@@ -132,6 +132,7 @@ def process_precaptioned_job(job_id: str):
             export_dir,
             job.suggested_thumbnail_text_fi or "KATSO",
             job.suggested_thumbnail_text_en or "WATCH",
+            text_color=job.thumbnail_text_color,
         )
 
         job.thumbnail_path = thumb_paths["clean"]

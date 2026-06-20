@@ -229,6 +229,7 @@ class ShortGenApi(
         thumbnailIndex: Int,
         textFi: String,
         textEn: String,
+        thumbnailTextColor: String,
     ) = withContext(Dispatchers.IO) {
         requestJson(
             "POST",
@@ -236,7 +237,8 @@ class ShortGenApi(
             JSONObject()
                 .put("thumbnail_index", thumbnailIndex)
                 .put("text_fi", textFi.ifBlank { JSONObject.NULL })
-                .put("text_en", textEn.ifBlank { JSONObject.NULL }),
+                .put("text_en", textEn.ifBlank { JSONObject.NULL })
+                .put("thumbnail_text_color", thumbnailTextColor.ifBlank { JSONObject.NULL }),
         )
     }
 
@@ -245,6 +247,7 @@ class ShortGenApi(
         thumbnailIndex: Int,
         textFi: String,
         textEn: String,
+        thumbnailTextColor: String,
     ) = withContext(Dispatchers.IO) {
         requestJson(
             "POST",
@@ -252,7 +255,8 @@ class ShortGenApi(
             JSONObject()
                 .put("index", thumbnailIndex)
                 .put("text_fi", textFi.ifBlank { JSONObject.NULL })
-                .put("text_en", textEn.ifBlank { JSONObject.NULL }),
+                .put("text_en", textEn.ifBlank { JSONObject.NULL })
+                .put("thumbnail_text_color", thumbnailTextColor.ifBlank { JSONObject.NULL }),
         )
     }
 

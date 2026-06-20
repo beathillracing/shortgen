@@ -59,7 +59,7 @@ def apply_corrections(text: str) -> str:
     return result
 
 
-def transcribe_audio(audio_path: str, custom_vocabulary: list = None) -> dict:
+def transcribe_audio(audio_path: str, custom_vocabulary: list = None, highlight_color: str = None) -> dict:
     """
     Transcribe audio using Groq Whisper large-v3 API.
 
@@ -172,7 +172,7 @@ def transcribe_audio(audio_path: str, custom_vocabulary: list = None) -> dict:
                     "start": w.start,
                     "end": w.end
                 })
-        ass_content = generate_karaoke_ass(word_list)
+        ass_content = generate_karaoke_ass(word_list, highlight_color=highlight_color or "#66FF00")
 
     return {
         "transcript": transcript,
@@ -240,7 +240,18 @@ def seconds_to_srt_time(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:06.3f}".replace(".", ",")
 
 
-def generate_karaoke_ass(words: list, video_width: int = 1080, video_height: int = 1920) -> str:
+def _hex_to_ass_bgr(hex_color: str) -> str:
+    h = (hex_color or "").lstrip("#")
+    if len(h) != 6:
+        return "00FF66"
+    try:
+        int(h, 16)
+    except ValueError:
+        return "00FF66"
+    return (h[4:6] + h[2:4] + h[0:2]).upper()
+
+
+def generate_karaoke_ass(words: list, video_width: int = 1080, video_height: int = 1920, highlight_color: str = "#66FF00") -> str:
     """
     Generate ASS subtitle file with CapCut-style word pop effect.
     Shows 2-3 words at a time, current word highlighted and scaled.
@@ -269,6 +280,7 @@ Style: Word,Poppins Black,90,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
+    hl = _hex_to_ass_bgr(highlight_color)
     events = []
 
     # Group words into chunks of 2-3 words
@@ -310,7 +322,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                     parts.append(f"{{\\c&HFFFFFF&\\fscx100\\fscy100}}{word_text}")
                 elif j == i:
                     # Current word - GREEN, slightly bigger, with pop animation
-                    parts.append(f"{{\\c&H00FF66&\\fscx115\\fscy115\\t(0,50,\\fscx100\\fscy100)}}{word_text}")
+                    parts.append(f"{{\\c&H{hl}&\\fscx115\\fscy115\\t(0,50,\\fscx100\\fscy100)}}{word_text}")
                 else:
                     # Not yet spoken - white, normal
                     parts.append(f"{{\\c&HFFFFFF&\\fscx100\\fscy100}}{word_text}")

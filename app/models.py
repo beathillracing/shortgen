@@ -40,6 +40,8 @@ class Job(Base):
     suggested_hook_en = Column(String(500))
     suggested_thumbnail_text_fi = Column(String(255))
     suggested_thumbnail_text_en = Column(String(255))
+    caption_highlight_color = Column(String(7))
+    thumbnail_text_color = Column(String(7))
 
     # Output
     output_video_path = Column(String(500))

@@ -763,6 +763,7 @@ def create_upload_session(
             "youtube_autopost": "true" if data.get("youtube_autopost") else "false",
             "precaptioned": "true" if data.get("precaptioned") else "false",
             "remove_outro_seconds": str(data.get("remove_outro_seconds", "3")),
+            "caption_highlight_color": str(data.get("caption_highlight_color") or "").strip() or None,
         },
     }
     _write_metadata(session_dir, metadata)

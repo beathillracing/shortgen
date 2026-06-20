@@ -1,5 +1,10 @@
+import os
 from pydantic_settings import BaseSettings
 from pathlib import Path
+
+# Google adds userinfo/openid scopes to YouTube grants; relax oauthlib's
+# strict scope-equality check so the OAuth callback does not error.
+os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 
 class Settings(BaseSettings):

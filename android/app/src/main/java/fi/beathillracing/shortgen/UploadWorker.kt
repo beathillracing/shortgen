@@ -132,6 +132,7 @@ class UploadWorker(
             .put("burn_captions", inputData.getBoolean(KEY_BURN_CAPTIONS, true))
             .put("precaptioned", inputData.getBoolean(KEY_PRECAPTIONED, false))
             .put("remove_outro_seconds", inputData.getString(KEY_REMOVE_OUTRO) ?: "3")
+            .put("caption_highlight_color", inputData.getString(KEY_HIGHLIGHT_COLOR).orEmpty())
         return postJson(baseUrl, token, "/api/mobile/uploads", body)
     }
 
@@ -314,6 +315,7 @@ class UploadWorker(
         const val KEY_BURN_CAPTIONS = "burn_captions"
         const val KEY_PRECAPTIONED = "precaptioned"
         const val KEY_REMOVE_OUTRO = "remove_outro"
+        const val KEY_HIGHLIGHT_COLOR = "highlight_color"
         const val KEY_PROGRESS = "progress"
         const val KEY_JOB_ID = "job_id"
         const val KEY_JOB_URL = "job_url"

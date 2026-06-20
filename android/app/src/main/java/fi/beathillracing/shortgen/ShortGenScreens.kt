@@ -16,6 +16,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,6 +34,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -67,6 +69,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -121,6 +124,7 @@ fun UploadScreen(
     var minimalCuts by remember { mutableStateOf(false) }
     var burnCaptions by remember { mutableStateOf(true) }
     var precaptioned by remember { mutableStateOf(false) }
+    var highlightColor by remember { mutableStateOf("#4CAF50") }
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
@@ -186,6 +190,11 @@ fun UploadScreen(
             }
         }
 
+        if (burnCaptions && !precaptioned) {
+            Text("Caption highlight color", style = MaterialTheme.typography.bodyMedium)
+            ColorPalette(highlightColor) { highlightColor = it }
+        }
+
         account?.let { acct ->
             acct.usage.limit?.let { limit ->
                 Text(
@@ -224,6 +233,7 @@ fun UploadScreen(
                             .putBoolean(UploadWorker.KEY_BURN_CAPTIONS, burnCaptions)
                             .putBoolean(UploadWorker.KEY_PRECAPTIONED, precaptioned)
                             .putString(UploadWorker.KEY_REMOVE_OUTRO, "3")
+                            .putString(UploadWorker.KEY_HIGHLIGHT_COLOR, highlightColor)
                             .build(),
                     )
                     .setConstraints(
@@ -514,8 +524,8 @@ private fun JobContent(
                 job = job,
                 api = api,
                 busy = busy,
-                continueProcessing = { index, fi, en ->
-                    onAction { api.continueJob(job.summary.id, index, fi, en) }
+                continueProcessing = { index, fi, en, color ->
+                    onAction { api.continueJob(job.summary.id, index, fi, en, color) }
                 },
             )
             "review", "completed" -> ReviewAndPublish(
@@ -548,11 +558,12 @@ private fun ThumbnailSelection(
     job: JobDetail,
     api: ShortGenApi,
     busy: Boolean,
-    continueProcessing: (Int, String, String) -> Unit,
+    continueProcessing: (Int, String, String, String) -> Unit,
 ) {
     var selected by remember(job.summary.id) { mutableStateOf(job.selectedThumbnailIndex) }
     var textFi by remember(job.summary.id) { mutableStateOf(job.thumbnailTextFi) }
     var textEn by remember(job.summary.id) { mutableStateOf(job.thumbnailTextEn) }
+    var textColor by remember(job.summary.id) { mutableStateOf("#4CAF50") }
     Text("Choose thumbnail", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
     CandidateStrip(job.candidates, selected, api) { selected = it }
     OutlinedTextField(
@@ -567,8 +578,10 @@ private fun ThumbnailSelection(
         label = { Text("English thumbnail text") },
         modifier = Modifier.fillMaxWidth(),
     )
+    Text("Thumbnail text color", style = MaterialTheme.typography.bodyMedium)
+    ColorPalette(textColor) { textColor = it }
     Button(
-        onClick = { continueProcessing(selected, textFi, textEn) },
+        onClick = { continueProcessing(selected, textFi, textEn, textColor) },
         enabled = !busy,
         modifier = Modifier.fillMaxWidth(),
     ) { Text(if (busy) "Starting..." else "Continue processing") }
@@ -600,6 +613,7 @@ private fun ReviewAndPublish(
     var selectedCandidate by remember(job.summary.id) { mutableStateOf(job.selectedThumbnailIndex) }
     var thumbnailTextFi by remember(job.summary.id) { mutableStateOf(job.thumbnailTextFi) }
     var thumbnailTextEn by remember(job.summary.id) { mutableStateOf(job.thumbnailTextEn) }
+    var thumbnailTextColor by remember(job.summary.id) { mutableStateOf("#4CAF50") }
 
     if (job.hasVideo) {
         AuthVideo(api, job.media.getValue("video"))
@@ -660,6 +674,8 @@ private fun ReviewAndPublish(
             label = { Text("English thumbnail text") },
             modifier = Modifier.fillMaxWidth(),
         )
+        Text("Thumbnail text color", style = MaterialTheme.typography.bodyMedium)
+        ColorPalette(thumbnailTextColor) { thumbnailTextColor = it }
         OutlinedButton(
             onClick = {
                 onAction {
@@ -668,6 +684,7 @@ private fun ReviewAndPublish(
                         selectedCandidate,
                         thumbnailTextFi,
                         thumbnailTextEn,
+                        thumbnailTextColor,
                     )
                 }
             },
@@ -905,6 +922,30 @@ private fun ExportSection(
             enabled = allText.isNotBlank(),
             modifier = Modifier.weight(1f),
         ) { Text("Copy all text") }
+    }
+}
+
+@Composable
+private fun ColorPalette(selected: String, onSelected: (String) -> Unit) {
+    val colors = listOf(
+        "#4CAF50", "#FFEB3B", "#FF5252", "#FFFFFF",
+        "#2196F3", "#FF4081", "#FF9800", "#00E5FF",
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        colors.forEach { hex ->
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .background(Color(android.graphics.Color.parseColor(hex)), CircleShape)
+                    .border(
+                        width = if (hex == selected) 3.dp else 1.dp,
+                        color = if (hex == selected) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.outline,
+                        shape = CircleShape,
+                    )
+                    .clickable { onSelected(hex) },
+            )
+        }
     }
 }
 

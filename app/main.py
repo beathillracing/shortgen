@@ -58,6 +58,8 @@ def ensure_job_columns():
         "mobile_owner": "VARCHAR(50)",
         "suggested_thumbnail_text_fi": "VARCHAR(255)",
         "suggested_thumbnail_text_en": "VARCHAR(255)",
+        "caption_highlight_color": "VARCHAR(7)",
+        "thumbnail_text_color": "VARCHAR(7)",
     }
     with engine.begin() as conn:
         for name, ddl in columns.items():

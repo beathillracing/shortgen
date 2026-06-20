@@ -25,7 +25,7 @@ def analyze_and_prepare_video(db, job: Job, input_video: str, cut_video_path: st
     ffmpeg.extract_audio(input_video, audio_path)
 
     update_job_status(db, job, "transcribing", "Transcribing audio...", 30)
-    transcription = whisper.transcribe_audio(audio_path)
+    transcription = whisper.transcribe_audio(audio_path, highlight_color=job.caption_highlight_color)
     job.transcript = transcription["transcript"]
     job.srt_content = whisper.split_srt_into_chunks(transcription["srt"], max_words=4)
     db.commit()
@@ -255,7 +255,8 @@ def continue_processing(job_id: str, selected_thumbnail_index: int = 1, thumbnai
             base_thumb_path,
             export_dir,
             text_fi,
-            text_en
+            text_en,
+            text_color=job.thumbnail_text_color,
         )
 
         job.thumbnail_path = thumb_paths["clean"]
