@@ -28,14 +28,14 @@ android {
         create("full") {
             dimension = "edition"
             buildConfigField("boolean", "CREATOR_MODE", "false")
-            resValue("string", "app_name", "ShortGen")
+            resValue("string", "app_name", "Beathill Studio")
         }
         create("creator") {
             dimension = "edition"
             applicationIdSuffix = ".creator"
             versionNameSuffix = "-creator"
             buildConfigField("boolean", "CREATOR_MODE", "true")
-            resValue("string", "app_name", "ShortGen Creator")
+            resValue("string", "app_name", "Beathill Studio Creator")
         }
         create("direct") {
             dimension = "distribution"

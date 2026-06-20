@@ -1,12 +1,23 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services import youtube as yt_service
+from app.services import mobile_oauth
 from app.config import settings
 
 router = APIRouter()
+
+
+def _mobile_oauth_complete(provider: str) -> HTMLResponse:
+    return HTMLResponse(
+        "<!doctype html><meta name='viewport' content='width=device-width'>"
+        "<title>Account connected</title>"
+        "<main style='font:16px system-ui;text-align:center;padding:48px 20px'>"
+        f"<h1>{provider} connected</h1>"
+        "<p>You can close this page and return to Beathill Studio.</p></main>"
+    )
 
 
 @router.get("/youtube/status")
@@ -28,8 +39,17 @@ def youtube_auth():
 
 
 @router.get("/youtube/callback")
-def youtube_callback(request: Request):
+def youtube_callback(request: Request, db: Session = Depends(get_db)):
     """Handle OAuth callback from Google."""
+    code = request.query_params.get("code")
+    state = request.query_params.get("state")
+    if code and state:
+        try:
+            if mobile_oauth.handle_youtube_callback(db, code, state):
+                return _mobile_oauth_complete("YouTube")
+        except Exception as exc:
+            raise HTTPException(400, f"OAuth failed: {exc}") from exc
+
     # Get the full URL for token exchange
     authorization_response = str(request.url)
 

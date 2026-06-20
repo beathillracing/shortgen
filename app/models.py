@@ -151,6 +151,8 @@ class MobileAccess(Base):
     subscription_status = Column(String(30), default="free", nullable=False)
     subscription_product_id = Column(String(100))
     subscription_purchase_token_hash = Column(String(64), unique=True)
+    subscription_purchase_token_encrypted = Column(Text)
+    subscription_checked_at = Column(DateTime)
     subscription_expires_at = Column(DateTime)
     subscription_grace_until = Column(DateTime)
     monthly_job_limit = Column(Integer)
@@ -172,6 +174,17 @@ class OAuthConnection(Base):
     metadata_json = Column(JSON)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class OAuthState(Base):
+    __tablename__ = "oauth_states"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    state_hash = Column(String(64), unique=True, nullable=False, index=True)
+    mobile_access_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    provider = Column(String(30), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
 
 
 class MobileUsage(Base):

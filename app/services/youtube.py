@@ -17,18 +17,21 @@ CREDENTIALS_FILE = '/var/www/shortgen/youtube_client_secret.json'
 TOKEN_FILE = '/var/www/shortgen/youtube_token.json'
 
 
-def get_youtube_service():
+def get_youtube_service(credentials_data: dict | None = None):
     """Get authenticated YouTube service."""
     creds = None
 
     # Load existing token
-    if Path(TOKEN_FILE).exists():
+    if credentials_data:
+        creds = Credentials.from_authorized_user_info(credentials_data, SCOPES)
+    elif Path(TOKEN_FILE).exists():
         creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
 
     # Refresh if expired
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        save_credentials(creds)
+        if not credentials_data:
+            save_credentials(creds)
 
     if not creds or not creds.valid:
         return None  # Need to authorize first
@@ -90,7 +93,8 @@ def upload_video(
     tags: list = None,
     privacy: str = "private",  # private, unlisted, public
     is_short: bool = True,
-    thumbnail_path: str = None
+    thumbnail_path: str = None,
+    credentials_data: dict | None = None,
 ) -> dict:
     """
     Upload a video to YouTube.
@@ -106,7 +110,7 @@ def upload_video(
     Returns:
         dict with video_id and url
     """
-    service = get_youtube_service()
+    service = get_youtube_service(credentials_data)
     if not service:
         raise ValueError("YouTube not authenticated")
 

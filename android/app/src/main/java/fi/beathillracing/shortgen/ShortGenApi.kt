@@ -63,6 +63,11 @@ data class AccountStatus(
     val usage: AccountUsage,
 )
 
+data class PlatformConnection(
+    val connected: Boolean,
+    val label: String?,
+)
+
 data class JobDetail(
     val summary: JobSummary,
     val selectedThumbnailIndex: Int,
@@ -136,6 +141,28 @@ class ShortGenApi(
                 JSONObject().put("credential", credential),
             ),
         )
+    }
+
+    suspend fun getConnections(): Map<String, PlatformConnection> =
+        withContext(Dispatchers.IO) {
+            val root = requestJson("GET", "/api/mobile/connections")
+            val items = root.getJSONObject("connections")
+            items.keys().asSequence().associateWith { provider ->
+                val item = items.getJSONObject(provider)
+                PlatformConnection(
+                    connected = item.optBoolean("connected"),
+                    label = item.nullableString("label"),
+                )
+            }
+        }
+
+    suspend fun startConnection(provider: String): String = withContext(Dispatchers.IO) {
+        requestJson("POST", "/api/mobile/connections/$provider/auth")
+            .getString("authorization_url")
+    }
+
+    suspend fun disconnect(provider: String) = withContext(Dispatchers.IO) {
+        requestJson("DELETE", "/api/mobile/connections/$provider")
     }
 
     suspend fun verifySubscription(purchaseToken: String): AccountStatus =

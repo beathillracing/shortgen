@@ -916,7 +916,11 @@ fun SettingsScreen(
     var token by remember(initialToken) { mutableStateOf(initialToken) }
     var themeMode by remember(initialThemeMode) { mutableStateOf(initialThemeMode) }
     Column(
-        modifier = Modifier.fillMaxSize().padding(padding).padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         Text("Connection", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)

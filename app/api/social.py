@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from redis import Redis
 from rq import Queue
 from sqlalchemy.orm import Session
@@ -9,10 +9,20 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Job
 from app.config import settings
-from app.services import meta, tiktok
+from app.services import meta, mobile_oauth, tiktok
 from app.services.public_media import media_url
 
 router = APIRouter()
+
+
+def _mobile_oauth_complete(provider: str) -> HTMLResponse:
+    return HTMLResponse(
+        "<!doctype html><meta name='viewport' content='width=device-width'>"
+        "<title>Account connected</title>"
+        "<main style='font:16px system-ui;text-align:center;padding:48px 20px'>"
+        f"<h1>{provider} connected</h1>"
+        "<p>You can close this page and return to Beathill Studio.</p></main>"
+    )
 
 
 def _job_or_404(job_id: str, db: Session) -> Job:
@@ -78,13 +88,19 @@ def meta_auth():
 
 
 @router.get("/meta/callback")
-def meta_callback(request: Request):
+def meta_callback(request: Request, db: Session = Depends(get_db)):
     if error := request.query_params.get("error_message"):
         raise HTTPException(400, error)
     code = request.query_params.get("code")
     if not code:
         raise HTTPException(400, "Missing Meta OAuth code")
-    meta.handle_callback(code, request.query_params.get("state"))
+    state = request.query_params.get("state")
+    try:
+        if state and mobile_oauth.handle_meta_callback(db, code, state):
+            return _mobile_oauth_complete("Meta")
+        meta.handle_callback(code, state)
+    except Exception as exc:
+        raise HTTPException(400, f"Meta OAuth failed: {exc}") from exc
     return RedirectResponse("/?meta=connected")
 
 
@@ -124,13 +140,19 @@ def tiktok_auth():
 
 
 @router.get("/tiktok/callback")
-def tiktok_callback(request: Request):
+def tiktok_callback(request: Request, db: Session = Depends(get_db)):
     if error := request.query_params.get("error_description"):
         raise HTTPException(400, error)
     code = request.query_params.get("code")
     if not code:
         raise HTTPException(400, "Missing TikTok OAuth code")
-    tiktok.handle_callback(code, request.query_params.get("state"))
+    state = request.query_params.get("state")
+    try:
+        if state and mobile_oauth.handle_tiktok_callback(db, code, state):
+            return _mobile_oauth_complete("TikTok")
+        tiktok.handle_callback(code, state)
+    except Exception as exc:
+        raise HTTPException(400, f"TikTok OAuth failed: {exc}") from exc
     return RedirectResponse("/?tiktok=connected")
 
 

@@ -34,13 +34,14 @@ def is_configured() -> bool:
     return bool(settings.tiktok_client_key and settings.tiktok_client_secret)
 
 
-def get_auth_url() -> str | None:
+def get_auth_url(state: str | None = None, persist_state: bool = True) -> str | None:
     if not is_configured():
         return None
 
-    state = secrets.token_urlsafe(24)
-    STATE_FILE.write_text(state, encoding="utf-8")
-    os.chmod(STATE_FILE, 0o600)
+    state = state or secrets.token_urlsafe(24)
+    if persist_state:
+        STATE_FILE.write_text(state, encoding="utf-8")
+        os.chmod(STATE_FILE, 0o600)
     params = {
         "client_key": settings.tiktok_client_key,
         "redirect_uri": f"{settings.base_url.rstrip('/')}/api/tiktok/callback",
@@ -74,8 +75,27 @@ def handle_callback(code: str, state: str | None):
     STATE_FILE.unlink(missing_ok=True)
 
 
-def _access_token() -> str:
-    token = _load_token()
+def exchange_mobile_code(code: str) -> dict:
+    with httpx.Client(timeout=30) as client:
+        response = client.post(
+            f"{API_BASE}/oauth/token/",
+            data={
+                "client_key": settings.tiktok_client_key,
+                "client_secret": settings.tiktok_client_secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": f"{settings.base_url.rstrip('/')}/api/tiktok/callback",
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    response.raise_for_status()
+    token = response.json()
+    token["expires_at"] = int(time.time()) + int(token.get("expires_in", 0))
+    return token
+
+
+def _access_token(connection_data: dict | None = None) -> str:
+    token = connection_data or _load_token()
     access_token = token.get("access_token")
     if not access_token:
         raise ValueError("TikTok is not authenticated")
@@ -89,8 +109,8 @@ def _authorized_scopes() -> set[str]:
     return {item.strip() for item in scope.split(",") if item.strip()}
 
 
-def get_user_info() -> dict:
-    access_token = _access_token()
+def get_user_info(connection_data: dict | None = None) -> dict:
+    access_token = _access_token(connection_data)
     with httpx.Client(timeout=30) as client:
         response = client.get(
             f"{API_BASE}/user/info/",
@@ -131,13 +151,13 @@ def disconnect():
     STATE_FILE.unlink(missing_ok=True)
 
 
-def upload_video_draft(video_path: str) -> dict:
+def upload_video_draft(video_path: str, connection_data: dict | None = None) -> dict:
     path = Path(video_path)
     if not path.exists():
         raise ValueError("Video file is missing")
 
     file_size = path.stat().st_size
-    access_token = _access_token()
+    access_token = _access_token(connection_data)
     init_body = {
         "source_info": {
             "source": "FILE_UPLOAD",

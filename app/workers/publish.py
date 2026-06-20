@@ -3,6 +3,8 @@ from pathlib import Path
 from app.database import SessionLocal
 from app.models import Job
 from app.services import meta, tiktok, youtube
+from app.services.mobile_accounts import entitlement, refresh_subscription_if_due
+from app.services.mobile_oauth import connection_data
 from app.services.public_media import media_url
 
 
@@ -53,10 +55,17 @@ def _prepare_video(job: Job, thumbnail_path: str | None, prepend_thumbnail: bool
         raise ValueError("Could not prepare video for publishing")
 
 
+def _credentials(db, job: Job, provider: str) -> dict | None:
+    if not job.mobile_owner:
+        return None
+    return connection_data(db, job.mobile_owner, provider)
+
+
 def _publish_youtube(db, job: Job, options: dict) -> dict:
     if job.youtube_video_id:
         return {"status": "already_posted", "url": job.youtube_url}
-    if not youtube.is_authenticated():
+    credentials = _credentials(db, job, "youtube")
+    if not credentials and not youtube.is_authenticated():
         raise ValueError("YouTube is not authenticated")
 
     content_type = options["content_type"]
@@ -73,6 +82,7 @@ def _publish_youtube(db, job: Job, options: dict) -> dict:
         privacy="public",
         is_short=(content_type == "short"),
         thumbnail_path=thumbnail_path,
+        credentials_data=credentials,
     )
     job.youtube_video_id = result["video_id"]
     job.youtube_url = result["url"]
@@ -99,6 +109,7 @@ def _publish_instagram(db, job: Job, options: dict) -> dict:
         video_url=media_url(str(job.id), "video"),
         cover_url=media_url(str(job.id), _thumbnail_kind(options["thumbnail"])),
         caption=_caption(job, options["language"], 2200),
+        connection_data=_credentials(db, job, "meta"),
     )
     job.instagram_media_id = result["media_id"]
     job.instagram_url = result.get("url")
@@ -119,6 +130,7 @@ def _publish_facebook(db, job: Job, options: dict) -> dict:
         video_url=media_url(str(job.id), "video"),
         description=_caption(job, options["language"], 5000),
         thumbnail_path=thumbnail_path,
+        connection_data=_credentials(db, job, "meta"),
     )
     job.facebook_video_id = result["video_id"]
     job.facebook_url = result.get("url")
@@ -140,7 +152,10 @@ def _publish_tiktok(db, job: Job, options: dict) -> dict:
     _prepare_video(job, thumbnail_path, prepend_thumbnail=True)
     db.commit()
 
-    result = tiktok.upload_video_draft(job.output_video_path)
+    result = tiktok.upload_video_draft(
+        job.output_video_path,
+        connection_data=_credentials(db, job, "tiktok"),
+    )
     job.tiktok_publish_id = result["publish_id"]
     job.tiktok_url = result.get("url")
     job.tiktok_status = result.get("status") or "draft_uploaded"
@@ -165,6 +180,13 @@ def publish_job(job_id: str, options: dict):
             raise ValueError("Job not found")
         if not job.output_video_path or not Path(job.output_video_path).exists():
             raise ValueError("Video is not ready")
+        if job.mobile_owner:
+            try:
+                current = refresh_subscription_if_due(db, job.mobile_owner)
+            except Exception:
+                current = entitlement(db, job.mobile_owner)
+            if not current["publishing_enabled"]:
+                raise ValueError("Beathill Studio Pro is no longer active")
 
         platforms = options["platforms"]
         results = {}

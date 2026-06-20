@@ -60,13 +60,14 @@ def is_configured() -> bool:
     return bool(settings.meta_app_id and settings.meta_app_secret)
 
 
-def get_auth_url() -> str | None:
+def get_auth_url(state: str | None = None, persist_state: bool = True) -> str | None:
     if not is_configured():
         return None
 
-    state = secrets.token_urlsafe(24)
-    STATE_FILE.write_text(state, encoding="utf-8")
-    os.chmod(STATE_FILE, 0o600)
+    state = state or secrets.token_urlsafe(24)
+    if persist_state:
+        STATE_FILE.write_text(state, encoding="utf-8")
+        os.chmod(STATE_FILE, 0o600)
 
     params = {
         "client_id": settings.meta_app_id,
@@ -136,6 +137,27 @@ def handle_callback(code: str, state: str | None):
 
     _save_json(TOKEN_FILE, data)
     STATE_FILE.unlink(missing_ok=True)
+
+
+def exchange_mobile_code(code: str) -> dict:
+    token_data = _exchange_code(code)
+    access_token = token_data["access_token"]
+    expires_in = token_data.get("expires_in")
+    profile = _graph_get("/me", access_token, {"fields": "id,name"})
+    pages = list_pages(access_token)
+    selected_page = next((p for p in pages if p.get("instagram_business_account")), None)
+    if not selected_page and pages:
+        selected_page = pages[0]
+    data = {
+        "access_token": access_token,
+        "user_id": profile.get("id"),
+        "user_name": profile.get("name"),
+        "expires_at": int(time.time()) + int(expires_in) if expires_in else None,
+        "pages": pages,
+    }
+    if selected_page:
+        data.update(_selected_page_payload(selected_page))
+    return data
 
 
 def list_pages(access_token: str | None = None) -> list[dict]:
@@ -211,8 +233,8 @@ def disconnect():
     STATE_FILE.unlink(missing_ok=True)
 
 
-def _selected_tokens() -> tuple[str, str, str]:
-    data = _load_token()
+def _selected_tokens(connection_data: dict | None = None) -> tuple[str, str, str]:
+    data = connection_data or _load_token()
     page_id = data.get("selected_page_id")
     page_token = data.get("page_access_token")
     ig_user_id = data.get("instagram_user_id")
@@ -221,8 +243,13 @@ def _selected_tokens() -> tuple[str, str, str]:
     return page_id, page_token, ig_user_id
 
 
-def upload_instagram_reel(video_url: str, caption: str, cover_url: str | None = None) -> dict:
-    _, page_token, ig_user_id = _selected_tokens()
+def upload_instagram_reel(
+    video_url: str,
+    caption: str,
+    cover_url: str | None = None,
+    connection_data: dict | None = None,
+) -> dict:
+    _, page_token, ig_user_id = _selected_tokens(connection_data)
     if not ig_user_id:
         raise ValueError("Selected Facebook Page has no linked Instagram professional account")
 
@@ -258,8 +285,12 @@ def upload_instagram_reel(video_url: str, caption: str, cover_url: str | None = 
     }
 
 
-def set_facebook_video_thumbnail(video_id: str, thumbnail_path: str) -> bool:
-    _, page_token, _ = _selected_tokens()
+def set_facebook_video_thumbnail(
+    video_id: str,
+    thumbnail_path: str,
+    connection_data: dict | None = None,
+) -> bool:
+    _, page_token, _ = _selected_tokens(connection_data)
     path = Path(thumbnail_path)
     if not path.exists():
         raise ValueError("Facebook thumbnail file is missing")
@@ -284,8 +315,9 @@ def upload_facebook_reel(
     video_url: str,
     description: str,
     thumbnail_path: str | None = None,
+    connection_data: dict | None = None,
 ) -> dict:
-    page_id, page_token, _ = _selected_tokens()
+    page_id, page_token, _ = _selected_tokens(connection_data)
     started = _graph_post(f"/{page_id}/video_reels", page_token, {"upload_phase": "start"})
     video_id = started["video_id"]
     upload_url = started["upload_url"]
@@ -314,7 +346,11 @@ def upload_facebook_reel(
     thumbnail_error = None
     if thumbnail_path:
         try:
-            thumbnail_uploaded = set_facebook_video_thumbnail(video_id, thumbnail_path)
+            thumbnail_uploaded = set_facebook_video_thumbnail(
+                video_id,
+                thumbnail_path,
+                connection_data,
+            )
         except Exception as exc:
             thumbnail_error = str(exc)
 

@@ -1,5 +1,5 @@
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import MobileAccess, MobileUsage
+from app.services.secure_data import decrypt_json, encrypt_json
 
 
 ACTIVE_SUBSCRIPTION_STATES = {
@@ -88,15 +89,17 @@ def entitlement(db: Session, account_id: str) -> dict:
 
 
 def consume_job_allowance(db: Session, account_id: str):
+    record = account_record(db, account_id)
+    account = (
+        db.query(MobileAccess)
+        .filter(MobileAccess.id == record.id)
+        .with_for_update()
+        .one()
+    )
     current = entitlement(db, account_id)
-    # Unmetered plans (Pro subscription or admin-granted unlimited) report
-    # jobs_remaining=None; short-circuit before the numeric free-limit check.
     if current["usage"]["jobs_remaining"] is None:
         return current
-    if current["usage"]["jobs_remaining"] <= 0:
-        raise ValueError("Free monthly processing limit reached")
 
-    account = account_record(db, account_id)
     period = current["usage"]["period"]
     usage = (
         db.query(MobileUsage)
@@ -114,6 +117,10 @@ def consume_job_allowance(db: Session, account_id: str):
             jobs_started=0,
         )
         db.add(usage)
+    limit = account.monthly_job_limit or settings.free_monthly_job_limit
+    if usage.jobs_started >= limit:
+        db.rollback()
+        raise ValueError("Free monthly processing limit reached")
     usage.jobs_started += 1
     db.commit()
     return entitlement(db, account_id)
@@ -162,12 +169,20 @@ def _publisher_service():
     return build("androidpublisher", "v3", credentials=credentials, cache_discovery=False)
 
 
-def verify_subscription(db: Session, account_id: str, purchase_token: str) -> dict:
+def _subscription_purchase(purchase_token: str) -> dict:
     service = _publisher_service()
-    purchase = service.purchases().subscriptionsv2().get(
+    return service.purchases().subscriptionsv2().get(
         packageName=settings.google_play_package_name,
         token=purchase_token,
     ).execute()
+
+
+def _apply_subscription(
+    db: Session,
+    account_id: str,
+    purchase_token: str,
+    purchase: dict,
+) -> dict:
     line_items = purchase.get("lineItems") or []
     product_ids = {item.get("productId") for item in line_items}
     if settings.google_play_subscription_product_id not in product_ids:
@@ -182,6 +197,10 @@ def verify_subscription(db: Session, account_id: str, purchase_token: str) -> di
     account.subscription_purchase_token_hash = hashlib.sha256(
         purchase_token.encode("utf-8")
     ).hexdigest()
+    account.subscription_purchase_token_encrypted = encrypt_json(
+        {"purchase_token": purchase_token}
+    )
+    account.subscription_checked_at = utcnow()
     account.subscription_expires_at = expires_at
     account.subscription_status = (
         "grace" if state == "SUBSCRIPTION_STATE_IN_GRACE_PERIOD"
@@ -191,3 +210,39 @@ def verify_subscription(db: Session, account_id: str, purchase_token: str) -> di
     account.subscription_grace_until = expires_at if account.subscription_status == "grace" else None
     db.commit()
     return entitlement(db, account_id)
+
+
+def verify_subscription(db: Session, account_id: str, purchase_token: str) -> dict:
+    return _apply_subscription(
+        db,
+        account_id,
+        purchase_token,
+        _subscription_purchase(purchase_token),
+    )
+
+
+def refresh_subscription_if_due(
+    db: Session,
+    account_id: str,
+    max_age: timedelta = timedelta(hours=6),
+) -> dict:
+    account = account_record(db, account_id)
+    if account.subscription_status == "admin_unlimited":
+        return entitlement(db, account_id)
+    if not account.subscription_purchase_token_encrypted:
+        return entitlement(db, account_id)
+    if (
+        account.subscription_checked_at
+        and account.subscription_checked_at > utcnow() - max_age
+    ):
+        return entitlement(db, account_id)
+
+    purchase_token = decrypt_json(
+        account.subscription_purchase_token_encrypted
+    )["purchase_token"]
+    return _apply_subscription(
+        db,
+        account_id,
+        purchase_token,
+        _subscription_purchase(purchase_token),
+    )

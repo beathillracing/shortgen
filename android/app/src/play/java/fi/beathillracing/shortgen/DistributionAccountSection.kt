@@ -29,6 +29,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
@@ -60,6 +63,7 @@ fun DistributionAccountSection(
     val scope = rememberCoroutineScope()
     val api = remember(server, token) { ShortGenApi(server, token) }
     var account by remember { mutableStateOf<AccountStatus?>(null) }
+    var connections by remember { mutableStateOf<Map<String, PlatformConnection>>(emptyMap()) }
     var error by remember { mutableStateOf<String?>(null) }
     var product by remember { mutableStateOf<ProductDetails?>(null) }
     var deleteConfirm by remember { mutableStateOf(false) }
@@ -67,7 +71,34 @@ fun DistributionAccountSection(
     fun refresh() {
         scope.launch {
             runCatching { api.getAccount() }
-                .onSuccess { account = it; error = null }
+                .onSuccess {
+                    account = it
+                    connections = if (it.publishingEnabled) {
+                        api.getConnections()
+                    } else {
+                        emptyMap()
+                    }
+                    error = null
+                }
+                .onFailure { error = it.message }
+        }
+    }
+
+    fun connect(provider: String) {
+        scope.launch {
+            runCatching { api.startConnection(provider) }
+                .onSuccess {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it)))
+                    error = null
+                }
+                .onFailure { error = it.message }
+        }
+    }
+
+    fun disconnect(provider: String) {
+        scope.launch {
+            runCatching { api.disconnect(provider) }
+                .onSuccess { refresh() }
                 .onFailure { error = it.message }
         }
     }
@@ -142,6 +173,14 @@ fun DistributionAccountSection(
     }
 
     LaunchedEffect(api) { refresh() }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, api) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refresh()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val googleOptions = remember {
         GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
@@ -150,6 +189,19 @@ fun DistributionAccountSection(
             .build()
     }
     val googleClient = remember { GoogleSignIn.getClient(context, googleOptions) }
+
+    fun linkGoogleCredential(credential: String) {
+        scope.launch {
+            runCatching { api.linkGoogle(credential) }
+                .onSuccess {
+                    account = it
+                    error = null
+                    refresh()
+                }
+                .onFailure { throwable -> error = throwable.message }
+        }
+    }
+
     val googleLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
     ) { result ->
@@ -158,13 +210,13 @@ fun DistributionAccountSection(
                 .getResult(ApiException::class.java)
                 .idToken ?: error("Google did not return an ID token")
         }
-        credential.onSuccess {
-            scope.launch {
-                runCatching { api.linkGoogle(it) }
-                    .onSuccess { status -> account = status; error = null }
-                    .onFailure { throwable -> error = throwable.message }
-            }
-        }.onFailure { error = it.message }
+        credential.onSuccess(::linkGoogleCredential)
+            .onFailure { error = it.message }
+    }
+    LaunchedEffect(api, googleClient) {
+        googleClient.silentSignIn().addOnSuccessListener { signedIn ->
+            signedIn.idToken?.let(::linkGoogleCredential)
+        }
     }
 
     HorizontalDivider()
@@ -172,7 +224,11 @@ fun DistributionAccountSection(
     account?.let { status ->
         Text(status.displayName ?: status.email ?: "Private app account")
         Text(
-            if (status.plan == "pro") "Beathill Studio Pro" else "Beathill Studio Free",
+            when (status.plan) {
+                "pro" -> "Beathill Studio Pro"
+                "unlimited" -> "Unlimited access"
+                else -> "Beathill Studio Free"
+            },
             color = MaterialTheme.colorScheme.primary,
         )
         if (status.usage.limit != null) {
@@ -190,7 +246,7 @@ fun DistributionAccountSection(
             Text("Google account linked")
         }
 
-        if (status.plan != "pro") {
+        if (!status.publishingEnabled) {
             Button(
                 onClick = {
                     val details = product ?: return@Button
@@ -209,6 +265,29 @@ fun DistributionAccountSection(
                 enabled = product != null,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("Upgrade to Pro") }
+        }
+
+        if (status.publishingEnabled) {
+            HorizontalDivider()
+            Text("Publishing accounts", style = MaterialTheme.typography.titleMedium)
+            PlatformConnectionRow(
+                label = "YouTube",
+                connection = connections["youtube"],
+                onConnect = { connect("youtube") },
+                onDisconnect = { disconnect("youtube") },
+            )
+            PlatformConnectionRow(
+                label = "Facebook and Instagram",
+                connection = connections["meta"],
+                onConnect = { connect("meta") },
+                onDisconnect = { disconnect("meta") },
+            )
+            PlatformConnectionRow(
+                label = "TikTok",
+                connection = connections["tiktok"],
+                onConnect = { connect("tiktok") },
+                onDisconnect = { disconnect("tiktok") },
+            )
         }
     }
 
@@ -270,3 +349,33 @@ fun DistributionAccountSection(
 }
 
 private var billingClientPlaceholder: BillingClient? = null
+
+@Composable
+private fun PlatformConnectionRow(
+    label: String,
+    connection: PlatformConnection?,
+    onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(label)
+        if (connection?.connected == true) {
+            Text(
+                connection.label ?: "Connected",
+                color = MaterialTheme.colorScheme.primary,
+            )
+            OutlinedButton(
+                onClick = onDisconnect,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Disconnect") }
+        } else {
+            OutlinedButton(
+                onClick = onConnect,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Connect") }
+        }
+    }
+}

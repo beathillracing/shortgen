@@ -79,6 +79,8 @@ def ensure_mobile_access_columns():
             "subscription_status": "VARCHAR(30) DEFAULT 'free' NOT NULL",
             "subscription_product_id": "VARCHAR(100)",
             "subscription_purchase_token_hash": "VARCHAR(64)",
+            "subscription_purchase_token_encrypted": "TEXT",
+            "subscription_checked_at": "TIMESTAMP",
             "subscription_expires_at": "TIMESTAMP",
             "subscription_grace_until": "TIMESTAMP",
             "monthly_job_limit": "INTEGER",

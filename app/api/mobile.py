@@ -16,14 +16,20 @@ from app.api.upload import create_and_queue_job
 from app.config import settings
 from app.database import get_db
 from app.models import Job
-from app.models import MobileAccess, MobileUsage, OAuthConnection
+from app.models import MobileAccess, MobileUsage, OAuthConnection, OAuthState
 from app.services.progress import get_progress
 from app.services.mobile_access import register_installation, resolve_access
 from app.services.mobile_accounts import (
     consume_job_allowance,
     entitlement,
     link_google_identity,
+    refresh_subscription_if_due,
     verify_subscription,
+)
+from app.services.mobile_oauth import (
+    authorization_url,
+    connection_statuses,
+    disconnect as disconnect_oauth,
 )
 from app.database import SessionLocal
 from redis import Redis
@@ -273,7 +279,62 @@ def mobile_account(
             "publishing_enabled": True,
             "usage": {"jobs_limit": None, "jobs_remaining": None},
         }
-    return entitlement(db, identity["owner"])
+    try:
+        return refresh_subscription_if_due(db, identity["owner"])
+    except Exception:
+        return entitlement(db, identity["owner"])
+
+
+def _require_mobile_publishing(db: Session, identity: dict):
+    if not identity["owner"] or not identity.get("access_id"):
+        raise HTTPException(400, "Platform connections require a Play app account")
+    try:
+        current = refresh_subscription_if_due(db, identity["owner"])
+    except Exception:
+        current = entitlement(db, identity["owner"])
+    if not current["publishing_enabled"]:
+        raise HTTPException(403, "Beathill Studio Pro is required for direct publishing")
+    return current
+
+
+@router.get("/connections")
+def mobile_connections(
+    identity: dict = Depends(_mobile_identity),
+    db: Session = Depends(get_db),
+):
+    _require_mobile_publishing(db, identity)
+    return {"connections": connection_statuses(db, identity["owner"])}
+
+
+@router.post("/connections/{provider}/auth")
+def mobile_connection_auth(
+    provider: str,
+    identity: dict = Depends(_mobile_identity),
+    db: Session = Depends(get_db),
+):
+    _require_mobile_publishing(db, identity)
+    if provider not in {"youtube", "meta", "tiktok"}:
+        raise HTTPException(404, "Unknown publishing platform")
+    try:
+        url = authorization_url(db, identity["owner"], provider)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not url:
+        raise HTTPException(503, f"{provider.title()} OAuth is not configured")
+    return {"authorization_url": url}
+
+
+@router.delete("/connections/{provider}")
+def mobile_connection_disconnect(
+    provider: str,
+    identity: dict = Depends(_mobile_identity),
+    db: Session = Depends(get_db),
+):
+    _require_mobile_publishing(db, identity)
+    if provider not in {"youtube", "meta", "tiktok"}:
+        raise HTTPException(404, "Unknown publishing platform")
+    disconnect_oauth(db, identity["owner"], provider)
+    return {"status": "disconnected"}
 
 
 @router.post("/billing/verify")
@@ -285,6 +346,8 @@ def mobile_verify_subscription(
     purchase_token = str(data.get("purchase_token") or "")
     if not purchase_token:
         raise HTTPException(400, "Purchase token is required")
+    if not identity["owner"] or not identity.get("access_id"):
+        raise HTTPException(400, "A Play app account is required")
     try:
         return verify_subscription(db, identity["owner"], purchase_token)
     except RuntimeError as exc:
@@ -329,6 +392,9 @@ def delete_mobile_account(
         )
         db.query(OAuthConnection).filter(
             OAuthConnection.mobile_access_id.in_(access_ids)
+        ).delete(synchronize_session=False)
+        db.query(OAuthState).filter(
+            OAuthState.mobile_access_id.in_(access_ids)
         ).delete(synchronize_session=False)
     for row in access_rows:
         db.delete(row)
@@ -475,10 +541,30 @@ def publish_mobile_job(
     db: Session = Depends(get_db),
     identity: dict = Depends(_mobile_identity),
 ):
-    publishing_enabled = identity["publishing_enabled"]
     if identity["owner"] and identity.get("access_id"):
-        publishing_enabled = entitlement(db, identity["owner"])["publishing_enabled"]
-    if not publishing_enabled:
+        _require_mobile_publishing(db, identity)
+        selected = set(data.get("platforms") or [])
+        statuses = connection_statuses(db, identity["owner"])
+        required = {
+            "youtube": "youtube",
+            "instagram": "meta",
+            "facebook": "meta",
+            "tiktok": "tiktok",
+        }
+        missing = sorted(
+            {
+                required[platform]
+                for platform in selected
+                if platform in required and not statuses[required[platform]]["connected"]
+            }
+        )
+        if missing:
+            raise HTTPException(
+                400,
+                "Connect these accounts before publishing: "
+                + ", ".join(provider.title() for provider in missing),
+            )
+    elif not identity["publishing_enabled"]:
         raise HTTPException(403, "Publishing is disabled for this mobile account")
     _job_or_404(job_id, db, identity)
     return queue_publish(job_id, data, db)
