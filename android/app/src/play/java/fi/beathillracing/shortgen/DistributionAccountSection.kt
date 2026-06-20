@@ -108,7 +108,7 @@ fun DistributionAccountSection(
                 .onSuccess {
                     account = it
                     connections = if (it.publishingEnabled) {
-                        api.getConnections()
+                        runCatching { api.getConnections() }.getOrDefault(emptyMap())
                     } else {
                         emptyMap()
                     }
