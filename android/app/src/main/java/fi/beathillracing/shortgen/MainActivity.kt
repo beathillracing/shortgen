@@ -2,6 +2,7 @@ package fi.beathillracing.shortgen
 
 import android.os.Bundle
 import android.content.Context
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -25,8 +26,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 
 class MainActivity : ComponentActivity() {
+    private var requestedJobId by mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        requestedJobId = intent.getStringExtra(EXTRA_JOB_ID)
         setContent {
             val preferences = getSharedPreferences(
                 UploadWorker.PREFERENCES,
@@ -43,9 +47,20 @@ class MainActivity : ComponentActivity() {
                 ShortGenApp(
                     themeMode = themeMode,
                     onThemeChanged = { themeMode = it },
+                    initialJobId = requestedJobId,
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        requestedJobId = intent.getStringExtra(EXTRA_JOB_ID)
+    }
+
+    companion object {
+        const val EXTRA_JOB_ID = "job_id"
     }
 }
 
@@ -60,13 +75,14 @@ private enum class AppTab(val label: String) {
 private fun ShortGenApp(
     themeMode: ThemeMode,
     onThemeChanged: (ThemeMode) -> Unit,
+    initialJobId: String?,
 ) {
     val context = LocalContext.current
     val preferences = remember {
         context.getSharedPreferences(UploadWorker.PREFERENCES, Context.MODE_PRIVATE)
     }
-    var tab by remember { mutableStateOf(AppTab.Upload) }
-    var selectedJobId by remember { mutableStateOf<String?>(null) }
+    var tab by remember { mutableStateOf(if (initialJobId == null) AppTab.Upload else AppTab.Jobs) }
+    var selectedJobId by remember { mutableStateOf(initialJobId) }
     var configVersion by remember { mutableStateOf(0) }
     val server = remember(configVersion) {
         preferences.getString(UploadWorker.KEY_BASE_URL, DEFAULT_SERVER) ?: DEFAULT_SERVER
@@ -75,6 +91,12 @@ private fun ShortGenApp(
         SecureStore.get(context, UploadWorker.KEY_TOKEN).orEmpty()
     }
     val configured = server.startsWith("https://") && token.isNotBlank()
+    androidx.compose.runtime.LaunchedEffect(initialJobId) {
+        if (initialJobId != null) {
+            selectedJobId = initialJobId
+            tab = AppTab.Jobs
+        }
+    }
     DistributionAccountProvisioning(
         server = server,
         token = token,

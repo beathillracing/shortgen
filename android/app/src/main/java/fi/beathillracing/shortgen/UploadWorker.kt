@@ -13,6 +13,12 @@ import androidx.core.content.edit
 import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.ForegroundInfo
+import androidx.work.BackoffPolicy
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -23,6 +29,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 class UploadWorker(
@@ -92,7 +99,10 @@ class UploadWorker(
             )
             preferences.edit { remove(sessionKey) }
             val jobId = completed.getString("job_id")
-            tokenRef?.let { SecureStore.remove(applicationContext, it) }
+            val monitorTokenRef = tokenRef ?: "job_token_${UUID.randomUUID()}".also {
+                SecureStore.put(applicationContext, it, token)
+            }
+            enqueueJobMonitor(baseUrl, monitorTokenRef, jobId)
             Result.success(
                 Data.Builder()
                     .putString(KEY_JOB_ID, jobId)
@@ -266,6 +276,30 @@ class UploadWorker(
 
     private fun errorData(message: String) =
         Data.Builder().putString(KEY_ERROR, message).build()
+
+    private fun enqueueJobMonitor(baseUrl: String, tokenRef: String, jobId: String) {
+        val request = OneTimeWorkRequestBuilder<JobMonitorWorker>()
+            .setInputData(
+                Data.Builder()
+                    .putString(JobMonitorWorker.KEY_BASE_URL, baseUrl)
+                    .putString(JobMonitorWorker.KEY_TOKEN_REF, tokenRef)
+                    .putString(JobMonitorWorker.KEY_JOB_ID, jobId)
+                    .build(),
+            )
+            .setConstraints(
+                Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build(),
+            )
+            .setBackoffCriteria(BackoffPolicy.LINEAR, 15, TimeUnit.SECONDS)
+            .addTag(JobMonitorWorker.WORK_TAG)
+            .build()
+        WorkManager.getInstance(applicationContext).enqueueUniqueWork(
+            "shortgen-job-monitor-$jobId",
+            ExistingWorkPolicy.REPLACE,
+            request,
+        )
+    }
 
     private data class LocalFile(val uri: Uri, val name: String, val size: Long)
 

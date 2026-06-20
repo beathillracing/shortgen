@@ -210,6 +210,7 @@ fun UploadScreen(
                 val tokenRef = "upload_token_${UUID.randomUUID()}"
                 SecureStore.put(context, tokenRef, token)
                 val request = OneTimeWorkRequestBuilder<UploadWorker>()
+                    .addTag(JobMonitorWorker.WORK_TAG)
                     .setInputData(
                         Data.Builder()
                             .putString(UploadWorker.KEY_BASE_URL, server.trimEnd('/'))

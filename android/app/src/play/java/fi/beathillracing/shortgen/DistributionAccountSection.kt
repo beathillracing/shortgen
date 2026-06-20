@@ -474,7 +474,8 @@ fun DistributionAccountSection(
                                     }
                                     saveAccounts(context, savedAccounts)
                                 }
-                                WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
+                                WorkManager.getInstance(context)
+                                    .cancelAllWorkByTag(JobMonitorWorker.WORK_TAG)
                                 SecureStore.removePrefix(context, "upload_token_")
                                 SecureStore.remove(context, UploadWorker.KEY_TOKEN)
                                 preferences.edit { remove("installation_id") }
