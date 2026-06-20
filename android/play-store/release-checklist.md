@@ -29,6 +29,10 @@
 - Add tester email addresses and install through Google Play.
 - Verify login/token setup, upload continuation, notifications, downloads,
   theme selection, and server processing.
+- Verify Google account linking, reinstall recovery and account switching.
+- Verify purchase, restore, cancellation, grace period and expiry with a Play
+  license tester.
+- Verify YouTube, Facebook, Instagram and TikTok are connected independently.
 - Verify that no APK update dialog or unknown-app-source prompt appears.
 - Promote the tested build to the required closed or production track.
 
@@ -36,5 +40,5 @@
 
 - Increase `versionCode`.
 - Update `versionName` and release notes.
-- Build new signed bundles with `./build-play.sh`.
+- Run `./release-preflight.sh`.
 - Test through an internal track before production.

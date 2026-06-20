@@ -19,12 +19,11 @@ Native Android uploader for `https://shortgen.beathillracing.fi`.
 2. Let Android Studio install Android SDK 35 when prompted.
 3. Build and install the required direct release variant on the phone:
    `fullDirectRelease` or `creatorDirectRelease`.
-4. Open `/mobile` in ShortGen to download the current APK and copy the token.
-5. Enter the mobile API token once in the app's Connection section.
+4. Play builds create a private installation account automatically.
+5. Link Google in Settings for account recovery across reinstalls and devices.
 
-The token is stored in Android app-private preferences and is not committed to
-this repository. The server token is the `MOBILE_API_TOKEN` value in
-`/var/www/shortgen/.env`.
+Session and remembered-account tokens are encrypted with Android Keystore.
+Manual support or administrator access codes remain available in Settings.
 
 The release signing keystore and passwords are stored only on this server in
 `shortgen-release.jks` and `local.properties`. Keep both files backed up;
@@ -52,3 +51,9 @@ Google Play manages updates:
 
 The Play app is **Beathill Studio**, package `beathill.studio`. It is a separate
 installation from the existing direct ShortGen APKs.
+
+Before a Play upload, run:
+
+```bash
+./release-preflight.sh
+```

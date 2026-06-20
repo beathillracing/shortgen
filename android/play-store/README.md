@@ -9,7 +9,7 @@ Prepared Play Store application:
 Build the signed Android App Bundle:
 
 ```bash
-./build-play.sh
+../release-preflight.sh
 ```
 
 The resulting bundles and checksums are written to `play-store/builds/`.
@@ -33,5 +33,7 @@ never upload or email the raw keystore.
 - API level 35 is targeted.
 - One Play listing provides free creation/export features and a Pro
   subscription for direct publishing.
+- Google account recovery and multiple remembered accounts are supported.
+- YouTube, Facebook, Instagram and TikTok use separate OAuth connections.
 
 See `release-checklist.md` before uploading.

@@ -1,31 +1,29 @@
 # Beathill Studio reviewer access
 
-The testing build requires a Beathill Studio access code. In Play Console,
-select that some or all functionality is restricted and provide reviewer
-instructions in the App access section.
-
-Do not place tokens in store descriptions, release notes, screenshots, or this
-repository. Enter them only in Play Console's protected reviewer credential
-fields.
+The Play build creates a private free account automatically. A reviewer does
+not need an access code to test video creation, processing, editing or export.
 
 ## Beathill Studio
 
 Instructions:
 
 1. Open Beathill Studio.
-2. Open Settings.
-3. Leave the server as `https://shortgen.beathillracing.fi`.
-4. Enter the reviewer access code supplied in the protected credential field.
-5. Save.
-6. Use Upload to select a test video, or use Jobs to review existing jobs.
+2. Wait for automatic account setup to complete.
+3. Use Upload to select a test video.
+4. Review the completed job and download the video or thumbnail.
+5. Optional: link a Google account in Settings to test account recovery.
 
-The reviewer token must have access to representative jobs. Connected social
-accounts are not required for testing free creation/export features. Supply a
-test subscription account when reviewing Pro publishing.
+Connected social accounts are not required for free creation/export review.
+For Pro review, provide a Google Play license-test account that can activate
+the subscription and provider test accounts authorized for the app.
+
+A manual support code can still be entered in Settings if Google requests a
+pre-populated account with representative jobs. Enter that code only in Play
+Console's protected reviewer credential field.
 
 ## Before submission
 
-- Confirm the token works from a clean installation.
-- Keep the reviewer tokens valid for the entire review period.
+- Confirm automatic registration works from a clean Play installation.
+- Confirm any optional reviewer support code remains valid.
 - Ensure the server is reachable continuously during review.
 - Keep at least one completed test job available.

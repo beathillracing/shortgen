@@ -6,12 +6,13 @@ answers against the production server configuration before submission.
 ## Shared answers
 
 - Data is encrypted in transit: Yes, HTTPS.
-- Users can request deletion: Yes, through `info@beathillracing.fi`.
+- Users can request deletion: Yes, directly in Settings and through
+  `info@beathillracing.fi`.
 - Data is sold: No.
 - Advertising data use: No.
 - Ads in the app: No.
-- Account creation inside the app: No. Access is configured with a server-issued
-  mobile API token.
+- Account creation inside the app: Yes. A private installation account is
+  created automatically and can be linked to Google.
 
 ## Data handled
 
@@ -31,10 +32,18 @@ answers against the production server configuration before submission.
 
 ### User identifiers
 
-- The mobile API token identifies the configured ShortGen access role.
+- Installation/account IDs and an app session token identify the account.
+- When Google is linked, email address, display name and Google subject ID are
+  stored for authentication and account recovery.
 - Connected social-platform identifiers are processed by the server for the
-  Full edition when publishing is configured.
+  Pro publishing features.
 - Purpose: Authentication, account management, and app functionality.
+
+### Purchases
+
+- Google Play purchase tokens, subscription product, status and expiry are
+  processed to verify Beathill Studio Pro.
+- Purpose: App functionality, fraud prevention and account management.
 
 ### App activity and diagnostics
 
@@ -44,9 +53,9 @@ answers against the production server configuration before submission.
 
 ## Third parties
 
-Depending on enabled features and explicit user actions, necessary content or
-metadata may be processed by Anthropic, Google/YouTube, Meta, TikTok, Groq, or
-other providers configured on the ShortGen server.
+Depending on enabled features and explicit user actions, necessary content,
+audio or metadata may be processed by Anthropic, Google/YouTube, Meta,
+Instagram, TikTok, Groq, or other configured providers.
 
 Free accounts do not expose direct social publishing. Pro accounts may use
 configured publishing providers after purchase verification.
