@@ -164,6 +164,7 @@ class MobileAccess(Base):
     monthly_job_limit = Column(Integer)
     deleted_at = Column(DateTime)
     fcm_token = Column(String(255))
+    preferences = Column(Text)
 
 
 class OAuthConnection(Base):

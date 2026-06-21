@@ -38,6 +38,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.SliderDefaults
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
@@ -139,6 +141,33 @@ fun UploadScreen(
     }
     var orientation by remember { mutableStateOf(prefs.getString("opt_orientation", "auto") ?: "auto") }
     var showOrientHelp by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(server, token) {
+        if (token.isBlank() || !server.startsWith("https://")) return@LaunchedEffect
+        val remote = runCatching {
+            ShortGenApi(server.trimEnd('/'), token).getPrefs()
+        }.getOrNull()
+        if (!remote.isNullOrEmpty()) {
+            prefs.edit {
+                remote.forEach { (k, v) ->
+                    if (k.startsWith("opt_") || k.startsWith("pub_")) {
+                        when (v) {
+                            "true" -> putBoolean(k, true)
+                            "false" -> putBoolean(k, false)
+                            else -> putString(k, v)
+                        }
+                    }
+                }
+            }
+            remote["opt_minimal_cuts"]?.let { minimalCuts = it == "true" }
+            remote["opt_burn_captions"]?.let { burnCaptions = it == "true" }
+            remote["opt_precaptioned"]?.let { precaptioned = it == "true" }
+            remote["opt_highlight_color"]?.let { highlightColor = it }
+            remote["opt_caption_border"]?.let { captionBorder = it == "true" }
+            remote["opt_border_color"]?.let { borderColor = it }
+            remote["opt_orientation"]?.let { orientation = it }
+        }
+    }
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
@@ -238,11 +267,12 @@ fun UploadScreen(
             Text("Caption highlight color", style = MaterialTheme.typography.bodyMedium)
             ColorPalette(highlightColor) { highlightColor = it }
             if (account?.publishingEnabled == true) {
-                RgbPicker(highlightColor) { highlightColor = it }
+                HuePicker(highlightColor) { highlightColor = it }
                 ToggleRow("Caption border", captionBorder) { captionBorder = it }
                 if (captionBorder) {
                     Text("Border color", style = MaterialTheme.typography.bodyMedium)
                     ColorPalette(borderColor) { borderColor = it }
+                    HuePicker(borderColor) { borderColor = it }
                 }
             }
         }
@@ -276,6 +306,19 @@ fun UploadScreen(
                     putBoolean("opt_caption_border", captionBorder)
                     putString("opt_border_color", borderColor)
                     putString("opt_orientation", orientation)
+                }
+                scope.launch {
+                    runCatching {
+                        ShortGenApi(server.trimEnd('/'), token).putPrefs(
+                            prefs.all.mapNotNull { (k, v) ->
+                                if (k.startsWith("opt_") || k.startsWith("pub_")) {
+                                    k to v.toString()
+                                } else {
+                                    null
+                                }
+                            }.toMap(),
+                        )
+                    }
                 }
                 val tokenRef = "upload_token_${UUID.randomUUID()}"
                 SecureStore.put(context, tokenRef, token)
@@ -884,6 +927,17 @@ private fun ReviewAndPublish(
                 putString("pub_content_type", contentType)
             }
             onAction {
+                runCatching {
+                    api.putPrefs(
+                        pubPrefs.all.mapNotNull { (k, v) ->
+                            if (k.startsWith("opt_") || k.startsWith("pub_")) {
+                                k to v.toString()
+                            } else {
+                                null
+                            }
+                        }.toMap(),
+                    )
+                }
                 api.updateMetadata(job.summary.id, title, description)
                 api.publish(job.summary.id, selectedPlatforms, language, thumbnail, contentType)
             }
@@ -1042,23 +1096,59 @@ private fun ExportSection(
 }
 
 @Composable
-private fun RgbPicker(color: String, onColor: (String) -> Unit) {
+private fun HuePicker(color: String, onColor: (String) -> Unit) {
     val parsed = runCatching { android.graphics.Color.parseColor(color) }
         .getOrDefault(android.graphics.Color.parseColor("#4CAF50"))
-    var r by remember(color) { mutableStateOf(android.graphics.Color.red(parsed).toFloat()) }
-    var g by remember(color) { mutableStateOf(android.graphics.Color.green(parsed).toFloat()) }
-    var b by remember(color) { mutableStateOf(android.graphics.Color.blue(parsed).toFloat()) }
-    fun emit() {
-        onColor(String.format("#%02X%02X%02X", r.toInt(), g.toInt(), b.toInt()))
+    val hsv = FloatArray(3)
+    android.graphics.Color.colorToHSV(parsed, hsv)
+    var hue by remember(color) { mutableStateOf(hsv[0]) }
+    val swatch = Color(parsed)
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .background(swatch, RoundedCornerShape(8.dp))
+                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp)),
+        )
+        Text(
+            color.uppercase(),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
-    Text(
-        "Custom color",
-        style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-    Slider(value = r, onValueChange = { r = it; emit() }, valueRange = 0f..255f)
-    Slider(value = g, onValueChange = { g = it; emit() }, valueRange = 0f..255f)
-    Slider(value = b, onValueChange = { b = it; emit() }, valueRange = 0f..255f)
+    Box(contentAlignment = Alignment.CenterStart) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(10.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(
+                            Color.Red, Color.Yellow, Color.Green,
+                            Color.Cyan, Color.Blue, Color.Magenta, Color.Red,
+                        ),
+                    ),
+                    RoundedCornerShape(5.dp),
+                ),
+        )
+        Slider(
+            value = hue,
+            onValueChange = {
+                hue = it
+                val c = android.graphics.Color.HSVToColor(floatArrayOf(it, 1f, 1f))
+                onColor(String.format("#%06X", 0xFFFFFF and c))
+            },
+            valueRange = 0f..360f,
+            colors = SliderDefaults.colors(
+                thumbColor = swatch,
+                activeTrackColor = Color.Transparent,
+                inactiveTrackColor = Color.Transparent,
+            ),
+        )
+    }
 }
 
 @Composable

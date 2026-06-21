@@ -92,6 +92,7 @@ def ensure_mobile_access_columns():
             "monthly_job_limit": "INTEGER",
             "deleted_at": "TIMESTAMP",
             "fcm_token": "VARCHAR(255)",
+            "preferences": "TEXT",
         }
         for name, ddl in columns.items():
             conn.execute(text(f"ALTER TABLE mobile_access ADD COLUMN IF NOT EXISTS {name} {ddl}"))

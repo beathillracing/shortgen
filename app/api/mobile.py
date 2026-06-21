@@ -370,6 +370,53 @@ def register_fcm_token(
     return {"status": "ok"}
 
 
+@router.get("/prefs")
+def get_mobile_prefs(
+    identity: dict = Depends(_mobile_identity),
+    db: Session = Depends(get_db),
+):
+    """Return this user's saved app settings (synced across their devices)."""
+    access_id = identity.get("access_id")
+    if not access_id:
+        return {}
+    row = db.query(MobileAccess).filter(MobileAccess.id == access_id).first()
+    if not row or not row.preferences:
+        return {}
+    try:
+        data = json.loads(row.preferences)
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+@router.put("/prefs")
+def put_mobile_prefs(
+    data: dict,
+    identity: dict = Depends(_mobile_identity),
+    db: Session = Depends(get_db),
+):
+    """Persist this user's app settings to all of their linked devices."""
+    access_id = identity.get("access_id")
+    if not access_id:
+        return {"status": "skipped"}
+    clean = {
+        str(k)[:64]: str(v)[:256]
+        for k, v in list(data.items())[:80]
+        if v is not None
+    }
+    payload = json.dumps(clean)
+    owner = identity.get("owner")
+    query = db.query(MobileAccess)
+    if owner:
+        query = query.filter(MobileAccess.account_id == owner)
+    else:
+        query = query.filter(MobileAccess.id == access_id)
+    for row in query.all():
+        row.preferences = payload
+    db.commit()
+    return {"status": "ok"}
+
+
 @router.post("/billing/verify")
 def mobile_verify_subscription(
     data: dict,

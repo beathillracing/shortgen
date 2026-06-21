@@ -219,6 +219,25 @@ class ShortGenApi(
         requestJson("POST", "/api/mobile/jobs/$jobId/retry")
     }
 
+    suspend fun getPrefs(): Map<String, String> = withContext(Dispatchers.IO) {
+        val resp = runCatching { requestJson("GET", "/api/mobile/prefs") }.getOrNull()
+            ?: return@withContext emptyMap()
+        val out = mutableMapOf<String, String>()
+        val keys = resp.keys()
+        while (keys.hasNext()) {
+            val k = keys.next()
+            out[k] = resp.optString(k)
+        }
+        out
+    }
+
+    suspend fun putPrefs(prefs: Map<String, String>) = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+        prefs.forEach { (k, v) -> body.put(k, v) }
+        runCatching { requestJson("PUT", "/api/mobile/prefs", body) }
+        Unit
+    }
+
     suspend fun updateMetadata(jobId: String, title: String, description: String) =
         withContext(Dispatchers.IO) {
             requestJson(
@@ -302,6 +321,7 @@ class ShortGenApi(
             "GET" -> builder.get()
             "POST" -> builder.post(requestBody ?: EMPTY_JSON)
             "PATCH" -> builder.patch(requestBody ?: EMPTY_JSON)
+            "PUT" -> builder.put(requestBody ?: EMPTY_JSON)
             "DELETE" -> builder.delete(requestBody)
             else -> error("Unsupported method")
         }
