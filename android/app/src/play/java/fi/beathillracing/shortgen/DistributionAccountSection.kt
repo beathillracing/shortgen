@@ -157,6 +157,11 @@ fun DistributionAccountSection(
                 .onSuccess { status ->
                     account = status
                     error = null
+                    if (status.publishingEnabled) {
+                        connections =
+                            runCatching { api.getConnections() }.getOrDefault(connections)
+                    }
+                    rememberAccount(status, token)
                     // Acknowledge only after the server confirms the purchase, so a
                     // failed verification leaves Google's auto-refund window intact.
                     if (!purchase.isAcknowledged) {
