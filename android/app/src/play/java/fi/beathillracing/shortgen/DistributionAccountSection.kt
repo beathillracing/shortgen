@@ -395,13 +395,7 @@ fun DistributionAccountSection(
                 ?.firstOrNull()
                 ?.formattedPrice
             Text("Beathill Studio Pro", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "\u2022 Publish straight to YouTube, Instagram, Facebook & TikTok\n" +
-                    "\u2022 Unlimited videos \u2014 no monthly limit\n" +
-                    "\u2022 Custom caption colors & borders (RGB slider)",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            ProFeatureList()
             Text(
                 if (proPrice != null) {
                     "$proPrice / month \u2022 cancel anytime in Google Play"
@@ -432,6 +426,8 @@ fun DistributionAccountSection(
         }
 
         if (status.publishingEnabled) {
+            Text("Beathill Studio Pro \u2014 active", style = MaterialTheme.typography.titleMedium)
+            ProFeatureList()
             HorizontalDivider()
             Text("Publishing accounts", style = MaterialTheme.typography.titleMedium)
             PlatformConnectionRow(
@@ -532,6 +528,17 @@ fun DistributionAccountSection(
 }
 
 private var billingClientPlaceholder: BillingClient? = null
+
+@Composable
+private fun ProFeatureList() {
+    Text(
+        "\u2022 Publish straight to YouTube, Instagram, Facebook & TikTok\n" +
+            "\u2022 Unlimited videos \u2014 no monthly limit\n" +
+            "\u2022 Custom caption colors & borders (RGB slider)",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
 
 private fun loadSavedAccounts(context: android.content.Context): List<SavedAccount> {
     val raw = SecureStore.get(context, SAVED_ACCOUNTS_KEY) ?: return emptyList()
