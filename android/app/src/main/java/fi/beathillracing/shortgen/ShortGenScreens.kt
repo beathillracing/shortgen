@@ -393,14 +393,18 @@ fun JobsScreen(
     LaunchedEffect(api, refreshKey) {
         if (api == null) return@LaunchedEffect
         while (true) {
-            runCatching { api.listJobs() }
+            val result = runCatching { api.listJobs() }
+            result
                 .onSuccess {
                     jobs = it
                     error = null
                 }
                 .onFailure { error = it.message }
             refreshing = false
-            delay(5000)
+            val active = result.getOrNull()?.any {
+                it.status !in setOf("completed", "failed", "review")
+            } ?: false
+            delay(if (active) 5_000 else 30_000)
         }
     }
 
