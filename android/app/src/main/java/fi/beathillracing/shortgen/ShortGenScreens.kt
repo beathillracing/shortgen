@@ -44,6 +44,7 @@ import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
@@ -53,6 +54,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
@@ -282,6 +284,7 @@ fun UploadScreen(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun JobsScreen(
     padding: PaddingValues,
     api: ShortGenApi?,
@@ -293,6 +296,7 @@ fun JobsScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var refreshKey by remember { mutableStateOf(0) }
     var pendingDelete by remember { mutableStateOf<JobSummary?>(null) }
+    var refreshing by remember { mutableStateOf(false) }
 
     LaunchedEffect(api, refreshKey) {
         if (api == null) return@LaunchedEffect
@@ -303,6 +307,7 @@ fun JobsScreen(
                     error = null
                 }
                 .onFailure { error = it.message }
+            refreshing = false
             delay(5000)
         }
     }
@@ -318,6 +323,14 @@ fun JobsScreen(
                 Icon(Icons.Default.Refresh, contentDescription = "Refresh")
             }
         }
+        PullToRefreshBox(
+            isRefreshing = refreshing,
+            onRefresh = {
+                refreshing = true
+                refreshKey += 1
+            },
+            modifier = Modifier.fillMaxSize(),
+        ) {
         when {
             api == null -> {
                 Button(
@@ -347,6 +360,7 @@ fun JobsScreen(
                     )
                 }
             }
+        }
         }
     }
 
@@ -1094,6 +1108,7 @@ fun SettingsScreen(
     initialThemeMode: ThemeMode,
     onThemeChanged: (ThemeMode) -> Unit,
     onSaved: () -> Unit,
+    onConfigChanged: () -> Unit,
 ) {
     val context = LocalContext.current
     val preferences = remember {
@@ -1102,6 +1117,9 @@ fun SettingsScreen(
     var server by remember(initialServer) { mutableStateOf(initialServer) }
     var token by remember(initialToken) { mutableStateOf(initialToken) }
     var themeMode by remember(initialThemeMode) { mutableStateOf(initialThemeMode) }
+    DisposableEffect(Unit) {
+        onDispose { onConfigChanged() }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -1121,7 +1139,10 @@ fun SettingsScreen(
         )
         OutlinedTextField(
             value = token,
-            onValueChange = { token = it },
+            onValueChange = {
+                token = it
+                if (it.isNotBlank()) SecureStore.put(context, UploadWorker.KEY_TOKEN, it.trim())
+            },
             label = { Text("Access code") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -1133,7 +1154,12 @@ fun SettingsScreen(
         )
         OutlinedTextField(
             value = server,
-            onValueChange = { server = it },
+            onValueChange = {
+                server = it
+                if (it.startsWith("https://")) {
+                    preferences.edit { putString(UploadWorker.KEY_BASE_URL, it.trimEnd('/')) }
+                }
+            },
             label = { Text("Server") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -1177,17 +1203,11 @@ fun SettingsScreen(
         Text("About", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Text("Beathill Studio ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
         HorizontalDivider()
-        Button(
-            onClick = {
-                preferences.edit {
-                    putString(UploadWorker.KEY_BASE_URL, server.trimEnd('/'))
-                }
-                SecureStore.put(context, UploadWorker.KEY_TOKEN, token.trim())
-                onSaved()
-            },
-            enabled = server.startsWith("https://") && token.isNotBlank(),
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Save") }
+        Text(
+            "Settings are saved automatically.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

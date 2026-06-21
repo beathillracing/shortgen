@@ -193,6 +193,7 @@ private fun ShortGenApp(
                     configVersion += 1
                     tab = AppTab.Upload
                 },
+                onConfigChanged = { configVersion += 1 },
             )
         }
     }
