@@ -9,9 +9,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -23,6 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -403,12 +408,14 @@ fun DistributionAccountSection(
             Text("Publishing accounts", style = MaterialTheme.typography.titleMedium)
             PlatformConnectionRow(
                 label = "YouTube",
+                help = "Connect your Google account to upload videos to your YouTube channel.",
                 connection = connections["youtube"],
                 onConnect = { connect("youtube") },
                 onDisconnect = { disconnect("youtube") },
             )
             PlatformConnectionRow(
                 label = "Facebook",
+                help = "Posts to a Facebook Page, not a personal profile. Connect the account that manages your Page.",
                 connection = connections["facebook"],
                 onConnect = { connect("facebook") },
                 onDisconnect = { disconnect("facebook") },
@@ -416,12 +423,14 @@ fun DistributionAccountSection(
             )
             PlatformConnectionRow(
                 label = "Instagram",
+                help = "Needs an Instagram Business or Creator account. Connect it directly, or it is included when you connect a Facebook Page that is linked to it.",
                 connection = connections["instagram"],
                 onConnect = { connect("instagram") },
                 onDisconnect = { disconnect("instagram") },
             )
             PlatformConnectionRow(
                 label = "TikTok",
+                help = "Uploads the video as a draft to your TikTok, where you review and post it.",
                 connection = connections["tiktok"],
                 onConnect = { connect("tiktok") },
                 onDisconnect = { disconnect("tiktok") },
@@ -535,16 +544,34 @@ private fun saveAccounts(
 @Composable
 private fun PlatformConnectionRow(
     label: String,
+    help: String,
     connection: PlatformConnection?,
     onConnect: () -> Unit,
     onDisconnect: () -> Unit,
     onSelect: ((String) -> Unit)? = null,
 ) {
+    var showHelp by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Text(label)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label)
+            IconButton(onClick = { showHelp = !showHelp }) {
+                Icon(
+                    Icons.Outlined.Info,
+                    contentDescription = "About $label",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (showHelp) {
+            Text(
+                help,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         if (connection?.connected == true) {
             Text(
                 if (connection.needsReconnect) {
