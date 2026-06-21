@@ -68,33 +68,6 @@ def public_creator_android_app():
     )
 
 
-@router.get("/public/beathill-studio-v0.8.0-8.aab")
-def public_beathill_studio_bundle():
-    return FileResponse(
-        "/var/www/shortgen/assets/public/beathill-studio-v0.8.0-8.aab",
-        media_type="application/octet-stream",
-        filename="beathill-studio-v0.8.0-8.aab",
-    )
-
-
-@router.get("/public/beathill-studio-v0.9.0-9.aab")
-def public_beathill_studio_bundle_v9():
-    return FileResponse(
-        "/var/www/shortgen/assets/public/beathill-studio-v0.9.0-9.aab",
-        media_type="application/octet-stream",
-        filename="beathill-studio-v0.9.0-9.aab",
-    )
-
-
-@router.get("/public/beathill-studio-v0.10.0-10.aab")
-def public_beathill_studio_bundle_v10():
-    return FileResponse(
-        "/var/www/shortgen/assets/public/beathill-studio-v0.10.0-10.aab",
-        media_type="application/octet-stream",
-        filename="beathill-studio-v0.10.0-10.aab",
-    )
-
-
 @router.get("/public/jobs/{job_id}/{kind}")
 def public_job_media(job_id: str, kind: str, token: str, db: Session = Depends(get_db)):
     if not verify_media_token(job_id, kind, token):

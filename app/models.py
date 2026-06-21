@@ -45,6 +45,7 @@ class Job(Base):
     caption_border = Column(String(10))
     caption_border_color = Column(String(7))
     orientation = Column(String(12))
+    caption_position = Column(String(8))
 
     # Output
     output_video_path = Column(String(500))

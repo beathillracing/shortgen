@@ -824,6 +824,7 @@ def create_upload_session(
             "caption_border": "false" if data.get("caption_border") is False else "true",
             "caption_border_color": str(data.get("caption_border_color") or "").strip() or None,
             "orientation": str(data.get("orientation") or "auto").strip() or "auto",
+            "caption_position": str(data.get("caption_position") or "bottom").strip() or "bottom",
         },
     }
     _write_metadata(session_dir, metadata)

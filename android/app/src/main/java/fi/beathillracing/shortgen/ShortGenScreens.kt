@@ -140,6 +140,8 @@ fun UploadScreen(
         mutableStateOf(prefs.getString("opt_border_color", "#000000") ?: "#000000")
     }
     var orientation by remember { mutableStateOf(prefs.getString("opt_orientation", "auto") ?: "auto") }
+    var captionPosition by remember { mutableStateOf(prefs.getString("opt_caption_position", "bottom") ?: "bottom") }
+    var showPositionHelp by remember { mutableStateOf(false) }
     var showOrientHelp by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(server, token) {
@@ -166,6 +168,7 @@ fun UploadScreen(
             remote["opt_caption_border"]?.let { captionBorder = it == "true" }
             remote["opt_border_color"]?.let { borderColor = it }
             remote["opt_orientation"]?.let { orientation = it }
+            remote["opt_caption_position"]?.let { captionPosition = it }
         }
     }
 
@@ -264,6 +267,42 @@ fun UploadScreen(
         }
 
         if (burnCaptions && !precaptioned) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Caption position")
+                IconButton(onClick = { showPositionHelp = !showPositionHelp }) {
+                    Icon(
+                        Icons.Outlined.Info,
+                        contentDescription = "About caption position",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (showPositionHelp) {
+                Text(
+                    "Where captions sit on the video. Bottom is the default and fits most " +
+                        "clips; pick Top or Middle if something important is at the bottom " +
+                        "of your footage. Stays inside a safe area for both orientations.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = captionPosition == "bottom",
+                    onClick = { captionPosition = "bottom" },
+                    label = { Text("Bottom") },
+                )
+                FilterChip(
+                    selected = captionPosition == "middle",
+                    onClick = { captionPosition = "middle" },
+                    label = { Text("Middle") },
+                )
+                FilterChip(
+                    selected = captionPosition == "top",
+                    onClick = { captionPosition = "top" },
+                    label = { Text("Top") },
+                )
+            }
             Text("Caption highlight color", style = MaterialTheme.typography.bodyMedium)
             ColorPalette(highlightColor) { highlightColor = it }
             if (account?.publishingEnabled == true) {
@@ -306,6 +345,7 @@ fun UploadScreen(
                     putBoolean("opt_caption_border", captionBorder)
                     putString("opt_border_color", borderColor)
                     putString("opt_orientation", orientation)
+                    putString("opt_caption_position", captionPosition)
                 }
                 scope.launch {
                     runCatching {
@@ -337,6 +377,7 @@ fun UploadScreen(
                             .putBoolean(UploadWorker.KEY_CAPTION_BORDER, captionBorder)
                             .putString(UploadWorker.KEY_BORDER_COLOR, borderColor)
                             .putString(UploadWorker.KEY_ORIENTATION, orientation)
+                            .putString(UploadWorker.KEY_CAPTION_POSITION, captionPosition)
                             .build(),
                     )
                     .setConstraints(

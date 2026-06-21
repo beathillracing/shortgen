@@ -33,6 +33,7 @@ def create_and_queue_job(
     caption_border: str | None = None,
     caption_border_color: str | None = None,
     orientation: str | None = None,
+    caption_position: str | None = None,
 ) -> Job:
     job = Job(
         original_filename=", ".join(filenames) if len(filenames) > 1 else filenames[0],
@@ -48,6 +49,7 @@ def create_and_queue_job(
         caption_border=caption_border,
         caption_border_color=caption_border_color,
         orientation=orientation,
+        caption_position=caption_position,
         status="pending",
         current_step="uploaded",
     )

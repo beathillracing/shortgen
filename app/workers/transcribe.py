@@ -39,6 +39,7 @@ def analyze_and_prepare_video(db, job: Job, input_video: str, cut_video_path: st
         border_color=job.caption_border_color,
         width=cap_w,
         height=cap_h,
+        position=job.caption_position or "bottom",
     )
     job.transcript = transcription["transcript"]
     job.srt_content = whisper.split_srt_into_chunks(transcription["srt"], max_words=4)

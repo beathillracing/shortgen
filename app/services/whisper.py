@@ -59,7 +59,7 @@ def apply_corrections(text: str) -> str:
     return result
 
 
-def transcribe_audio(audio_path: str, custom_vocabulary: list = None, highlight_color: str = None, border: bool = True, border_color: str = None, width: int = 1080, height: int = 1920) -> dict:
+def transcribe_audio(audio_path: str, custom_vocabulary: list = None, highlight_color: str = None, border: bool = True, border_color: str = None, width: int = 1080, height: int = 1920, position: str = "bottom") -> dict:
     """
     Transcribe audio using Groq Whisper large-v3 API.
 
@@ -172,7 +172,7 @@ def transcribe_audio(audio_path: str, custom_vocabulary: list = None, highlight_
                     "start": w.start,
                     "end": w.end
                 })
-        ass_content = generate_karaoke_ass(word_list, video_width=width, video_height=height, highlight_color=highlight_color or "#66FF00", border=border, border_color=border_color or "#000000")
+        ass_content = generate_karaoke_ass(word_list, video_width=width, video_height=height, highlight_color=highlight_color or "#66FF00", border=border, border_color=border_color or "#000000", position=position)
 
     return {
         "transcript": transcript,
@@ -251,7 +251,7 @@ def _hex_to_ass_bgr(hex_color: str) -> str:
     return (h[4:6] + h[2:4] + h[0:2]).upper()
 
 
-def generate_karaoke_ass(words: list, video_width: int = 1080, video_height: int = 1920, highlight_color: str = "#66FF00", border: bool = True, border_color: str = "#000000") -> str:
+def generate_karaoke_ass(words: list, video_width: int = 1080, video_height: int = 1920, highlight_color: str = "#66FF00", border: bool = True, border_color: str = "#000000", position: str = "bottom") -> str:
     """
     Generate ASS subtitle file with CapCut-style word pop effect.
     Shows 2-3 words at a time, current word highlighted and scaled.
@@ -266,6 +266,11 @@ def generate_karaoke_ass(words: list, video_width: int = 1080, video_height: int
     # ASS header with styles - CapCut style with Poppins font and thick outline
     outline_bgr = _hex_to_ass_bgr(border_color)
     outline_width = 6 if border else 0
+    # Caption placement. Default bottom keeps the original look; top/middle let
+    # users dodge on-screen action. MarginV scales with frame height so text
+    # stays inside a safe area for both vertical and horizontal videos.
+    _align = {"top": 8, "middle": 5, "bottom": 2}.get((position or "bottom").lower(), 2)
+    _margin_v = max(50, round(video_height * 0.078))
     ass_header = f"""[Script Info]
 Title: Pop Subtitles
 ScriptType: v4.00+
@@ -276,7 +281,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Word,Poppins Black,90,&H00FFFFFF,&H00FFFFFF,&H00{outline_bgr},&H00000000,-1,0,0,0,100,100,0,0,1,{outline_width},0,2,40,40,150,1
+Style: Word,Poppins Black,90,&H00FFFFFF,&H00FFFFFF,&H00{outline_bgr},&H00000000,-1,0,0,0,100,100,0,0,1,{outline_width},0,{_align},40,40,{_margin_v},1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

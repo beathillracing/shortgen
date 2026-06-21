@@ -237,18 +237,31 @@ def refresh_subscription_if_due(
         return entitlement(db, account_id)
     if not account.subscription_purchase_token_encrypted:
         return entitlement(db, account_id)
+    cached = entitlement(db, account_id)
+    now = utcnow()
+    checked = account.subscription_checked_at
+    # Return the cache only if it is fresh AND still shows Pro. If a recent check
+    # reports the user as not entitled, re-verify with Google before reporting
+    # free (kills the brief free->pro flicker). Don't hammer Google: trust a very
+    # recent not-entitled result for 10 minutes.
+    if checked and checked > now - max_age and cached["publishing_enabled"]:
+        return cached
     if (
-        account.subscription_checked_at
-        and account.subscription_checked_at > utcnow() - max_age
+        checked
+        and checked > now - timedelta(seconds=600)
+        and not cached["publishing_enabled"]
     ):
-        return entitlement(db, account_id)
+        return cached
 
-    purchase_token = decrypt_json(
-        account.subscription_purchase_token_encrypted
-    )["purchase_token"]
-    return _apply_subscription(
-        db,
-        account_id,
-        purchase_token,
-        _subscription_purchase(purchase_token),
-    )
+    try:
+        purchase_token = decrypt_json(
+            account.subscription_purchase_token_encrypted
+        )["purchase_token"]
+        return _apply_subscription(
+            db,
+            account_id,
+            purchase_token,
+            _subscription_purchase(purchase_token),
+        )
+    except Exception:
+        return cached
