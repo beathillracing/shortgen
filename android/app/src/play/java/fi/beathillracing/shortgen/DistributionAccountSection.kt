@@ -388,6 +388,29 @@ fun DistributionAccountSection(
         }
 
         if (!status.publishingEnabled) {
+            val proPrice = product?.subscriptionOfferDetails
+                ?.firstOrNull()
+                ?.pricingPhases
+                ?.pricingPhaseList
+                ?.firstOrNull()
+                ?.formattedPrice
+            Text("Beathill Studio Pro", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "\u2022 Publish straight to YouTube, Instagram, Facebook & TikTok\n" +
+                    "\u2022 Unlimited videos \u2014 no monthly limit\n" +
+                    "\u2022 Custom caption colors & borders (RGB slider)",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                if (proPrice != null) {
+                    "$proPrice / month \u2022 cancel anytime in Google Play"
+                } else {
+                    "Monthly subscription \u2022 cancel anytime in Google Play"
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             Button(
                 onClick = {
                     val details = product ?: return@Button
