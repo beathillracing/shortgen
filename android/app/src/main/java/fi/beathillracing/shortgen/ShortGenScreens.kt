@@ -16,6 +16,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -57,6 +58,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -130,6 +132,10 @@ fun UploadScreen(
     var highlightColor by remember {
         mutableStateOf(prefs.getString("opt_highlight_color", "#4CAF50") ?: "#4CAF50")
     }
+    var captionBorder by remember { mutableStateOf(prefs.getBoolean("opt_caption_border", true)) }
+    var borderColor by remember {
+        mutableStateOf(prefs.getString("opt_border_color", "#000000") ?: "#000000")
+    }
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
@@ -198,6 +204,14 @@ fun UploadScreen(
         if (burnCaptions && !precaptioned) {
             Text("Caption highlight color", style = MaterialTheme.typography.bodyMedium)
             ColorPalette(highlightColor) { highlightColor = it }
+            if (account?.publishingEnabled == true) {
+                RgbPicker(highlightColor) { highlightColor = it }
+                ToggleRow("Caption border", captionBorder) { captionBorder = it }
+                if (captionBorder) {
+                    Text("Border color", style = MaterialTheme.typography.bodyMedium)
+                    ColorPalette(borderColor) { borderColor = it }
+                }
+            }
         }
 
         account?.let { acct ->
@@ -226,6 +240,8 @@ fun UploadScreen(
                     putBoolean("opt_minimal_cuts", minimalCuts)
                     putBoolean("opt_precaptioned", precaptioned)
                     putString("opt_highlight_color", highlightColor)
+                    putBoolean("opt_caption_border", captionBorder)
+                    putString("opt_border_color", borderColor)
                 }
                 val tokenRef = "upload_token_${UUID.randomUUID()}"
                 SecureStore.put(context, tokenRef, token)
@@ -245,6 +261,8 @@ fun UploadScreen(
                             .putBoolean(UploadWorker.KEY_PRECAPTIONED, precaptioned)
                             .putString(UploadWorker.KEY_REMOVE_OUTRO, "3")
                             .putString(UploadWorker.KEY_HIGHLIGHT_COLOR, highlightColor)
+                            .putBoolean(UploadWorker.KEY_CAPTION_BORDER, captionBorder)
+                            .putString(UploadWorker.KEY_BORDER_COLOR, borderColor)
                             .build(),
                     )
                     .setConstraints(
@@ -955,12 +973,35 @@ private fun ExportSection(
 }
 
 @Composable
+private fun RgbPicker(color: String, onColor: (String) -> Unit) {
+    val parsed = runCatching { android.graphics.Color.parseColor(color) }
+        .getOrDefault(android.graphics.Color.parseColor("#4CAF50"))
+    var r by remember(color) { mutableStateOf(android.graphics.Color.red(parsed).toFloat()) }
+    var g by remember(color) { mutableStateOf(android.graphics.Color.green(parsed).toFloat()) }
+    var b by remember(color) { mutableStateOf(android.graphics.Color.blue(parsed).toFloat()) }
+    fun emit() {
+        onColor(String.format("#%02X%02X%02X", r.toInt(), g.toInt(), b.toInt()))
+    }
+    Text(
+        "Custom color",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Slider(value = r, onValueChange = { r = it; emit() }, valueRange = 0f..255f)
+    Slider(value = g, onValueChange = { g = it; emit() }, valueRange = 0f..255f)
+    Slider(value = b, onValueChange = { b = it; emit() }, valueRange = 0f..255f)
+}
+
+@Composable
 private fun ColorPalette(selected: String, onSelected: (String) -> Unit) {
     val colors = listOf(
-        "#4CAF50", "#FFEB3B", "#FF5252", "#FFFFFF",
+        "#4CAF50", "#FFEB3B", "#FF5252", "#FFFFFF", "#000000",
         "#2196F3", "#FF4081", "#FF9800", "#00E5FF",
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+    ) {
         colors.forEach { hex ->
             Box(
                 modifier = Modifier

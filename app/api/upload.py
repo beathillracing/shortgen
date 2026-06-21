@@ -30,6 +30,8 @@ def create_and_queue_job(
     remove_outro_seconds: str = "3",
     mobile_owner: str | None = None,
     caption_highlight_color: str | None = None,
+    caption_border: str | None = None,
+    caption_border_color: str | None = None,
 ) -> Job:
     job = Job(
         original_filename=", ".join(filenames) if len(filenames) > 1 else filenames[0],
@@ -42,6 +44,8 @@ def create_and_queue_job(
         remove_outro_seconds=remove_outro_seconds,
         mobile_owner=mobile_owner,
         caption_highlight_color=caption_highlight_color,
+        caption_border=caption_border,
+        caption_border_color=caption_border_color,
         status="pending",
         current_step="uploaded",
     )

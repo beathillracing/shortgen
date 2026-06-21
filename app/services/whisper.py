@@ -59,7 +59,7 @@ def apply_corrections(text: str) -> str:
     return result
 
 
-def transcribe_audio(audio_path: str, custom_vocabulary: list = None, highlight_color: str = None) -> dict:
+def transcribe_audio(audio_path: str, custom_vocabulary: list = None, highlight_color: str = None, border: bool = True, border_color: str = None) -> dict:
     """
     Transcribe audio using Groq Whisper large-v3 API.
 
@@ -172,7 +172,7 @@ def transcribe_audio(audio_path: str, custom_vocabulary: list = None, highlight_
                     "start": w.start,
                     "end": w.end
                 })
-        ass_content = generate_karaoke_ass(word_list, highlight_color=highlight_color or "#66FF00")
+        ass_content = generate_karaoke_ass(word_list, highlight_color=highlight_color or "#66FF00", border=border, border_color=border_color or "#000000")
 
     return {
         "transcript": transcript,
@@ -251,7 +251,7 @@ def _hex_to_ass_bgr(hex_color: str) -> str:
     return (h[4:6] + h[2:4] + h[0:2]).upper()
 
 
-def generate_karaoke_ass(words: list, video_width: int = 1080, video_height: int = 1920, highlight_color: str = "#66FF00") -> str:
+def generate_karaoke_ass(words: list, video_width: int = 1080, video_height: int = 1920, highlight_color: str = "#66FF00", border: bool = True, border_color: str = "#000000") -> str:
     """
     Generate ASS subtitle file with CapCut-style word pop effect.
     Shows 2-3 words at a time, current word highlighted and scaled.
@@ -264,6 +264,8 @@ def generate_karaoke_ass(words: list, video_width: int = 1080, video_height: int
         ASS file content as string
     """
     # ASS header with styles - CapCut style with Poppins font and thick outline
+    outline_bgr = _hex_to_ass_bgr(border_color)
+    outline_width = 6 if border else 0
     ass_header = f"""[Script Info]
 Title: Pop Subtitles
 ScriptType: v4.00+
@@ -274,7 +276,7 @@ ScaledBorderAndShadow: yes
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Word,Poppins Black,90,&H00FFFFFF,&H00FFFFFF,&H00000000,&H00000000,-1,0,0,0,100,100,0,0,1,6,0,2,40,40,150,1
+Style: Word,Poppins Black,90,&H00FFFFFF,&H00FFFFFF,&H00{outline_bgr},&H00000000,-1,0,0,0,100,100,0,0,1,{outline_width},0,2,40,40,150,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text

@@ -764,6 +764,8 @@ def create_upload_session(
             "precaptioned": "true" if data.get("precaptioned") else "false",
             "remove_outro_seconds": str(data.get("remove_outro_seconds", "3")),
             "caption_highlight_color": str(data.get("caption_highlight_color") or "").strip() or None,
+            "caption_border": "false" if data.get("caption_border") is False else "true",
+            "caption_border_color": str(data.get("caption_border_color") or "").strip() or None,
         },
     }
     _write_metadata(session_dir, metadata)
