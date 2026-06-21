@@ -150,7 +150,7 @@ fun UploadScreen(
         if (!remote.isNullOrEmpty()) {
             prefs.edit {
                 remote.forEach { (k, v) ->
-                    if (k.startsWith("opt_") || k.startsWith("pub_")) {
+                    if (isSyncablePref(k)) {
                         when (v) {
                             "true" -> putBoolean(k, true)
                             "false" -> putBoolean(k, false)
@@ -311,11 +311,7 @@ fun UploadScreen(
                     runCatching {
                         ShortGenApi(server.trimEnd('/'), token).putPrefs(
                             prefs.all.mapNotNull { (k, v) ->
-                                if (k.startsWith("opt_") || k.startsWith("pub_")) {
-                                    k to v.toString()
-                                } else {
-                                    null
-                                }
+                                if (isSyncablePref(k)) k to v.toString() else null
                             }.toMap(),
                         )
                     }
@@ -930,11 +926,7 @@ private fun ReviewAndPublish(
                 runCatching {
                     api.putPrefs(
                         pubPrefs.all.mapNotNull { (k, v) ->
-                            if (k.startsWith("opt_") || k.startsWith("pub_")) {
-                                k to v.toString()
-                            } else {
-                                null
-                            }
+                            if (isSyncablePref(k)) k to v.toString() else null
                         }.toMap(),
                     )
                 }
@@ -1094,6 +1086,13 @@ private fun ExportSection(
         ) { Text("Copy all text") }
     }
 }
+
+// Sync every real setting across devices; never the encrypted login token
+// (secure.* blobs are bound to this device's keystore) or the server URL.
+private fun isSyncablePref(key: String): Boolean =
+    !key.startsWith("secure.") &&
+        key != UploadWorker.KEY_BASE_URL &&
+        key != UploadWorker.KEY_TOKEN
 
 @Composable
 private fun HuePicker(color: String, onColor: (String) -> Unit) {
@@ -1337,6 +1336,21 @@ fun SettingsScreen(
     var themeMode by remember(initialThemeMode) { mutableStateOf(initialThemeMode) }
     DisposableEffect(Unit) {
         onDispose { onConfigChanged() }
+    }
+    var themeSyncReady by remember { mutableStateOf(false) }
+    LaunchedEffect(themeMode) {
+        if (!themeSyncReady) {
+            themeSyncReady = true
+            return@LaunchedEffect
+        }
+        if (token.isBlank() || !server.startsWith("https://")) return@LaunchedEffect
+        runCatching {
+            ShortGenApi(server.trimEnd('/'), token).putPrefs(
+                preferences.all.mapNotNull { (k, v) ->
+                    if (isSyncablePref(k)) k to v.toString() else null
+                }.toMap(),
+            )
+        }
     }
     Column(
         modifier = Modifier
