@@ -137,6 +137,8 @@ fun UploadScreen(
     var borderColor by remember {
         mutableStateOf(prefs.getString("opt_border_color", "#000000") ?: "#000000")
     }
+    var orientation by remember { mutableStateOf(prefs.getString("opt_orientation", "auto") ?: "auto") }
+    var showOrientHelp by remember { mutableStateOf(false) }
 
     val picker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments(),
@@ -188,6 +190,36 @@ fun UploadScreen(
             modifier = Modifier.fillMaxWidth(),
         )
 
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Orientation")
+            IconButton(onClick = { showOrientHelp = !showOrientHelp }) {
+                Icon(
+                    Icons.Outlined.Info,
+                    contentDescription = "About orientation",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        if (showOrientHelp) {
+            Text(
+                "Auto keeps your video vertical (best for Shorts, Reels, TikTok). " +
+                    "Choose Horizontal for normal widescreen YouTube videos.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = orientation == "auto",
+                onClick = { orientation = "auto" },
+                label = { Text("Auto (vertical)") },
+            )
+            FilterChip(
+                selected = orientation == "horizontal",
+                onClick = { orientation = "horizontal" },
+                label = { Text("Horizontal") },
+            )
+        }
         ToggleRow("Karaoke captions", burnCaptions && !precaptioned) {
             burnCaptions = it
         }
@@ -243,6 +275,7 @@ fun UploadScreen(
                     putString("opt_highlight_color", highlightColor)
                     putBoolean("opt_caption_border", captionBorder)
                     putString("opt_border_color", borderColor)
+                    putString("opt_orientation", orientation)
                 }
                 val tokenRef = "upload_token_${UUID.randomUUID()}"
                 SecureStore.put(context, tokenRef, token)
@@ -264,6 +297,7 @@ fun UploadScreen(
                             .putString(UploadWorker.KEY_HIGHLIGHT_COLOR, highlightColor)
                             .putBoolean(UploadWorker.KEY_CAPTION_BORDER, captionBorder)
                             .putString(UploadWorker.KEY_BORDER_COLOR, borderColor)
+                            .putString(UploadWorker.KEY_ORIENTATION, orientation)
                             .build(),
                     )
                     .setConstraints(

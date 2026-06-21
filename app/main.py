@@ -62,6 +62,7 @@ def ensure_job_columns():
         "thumbnail_text_color": "VARCHAR(7)",
         "caption_border": "VARCHAR(10)",
         "caption_border_color": "VARCHAR(7)",
+        "orientation": "VARCHAR(12)",
     }
     with engine.begin() as conn:
         for name, ddl in columns.items():

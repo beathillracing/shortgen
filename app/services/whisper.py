@@ -59,7 +59,7 @@ def apply_corrections(text: str) -> str:
     return result
 
 
-def transcribe_audio(audio_path: str, custom_vocabulary: list = None, highlight_color: str = None, border: bool = True, border_color: str = None) -> dict:
+def transcribe_audio(audio_path: str, custom_vocabulary: list = None, highlight_color: str = None, border: bool = True, border_color: str = None, width: int = 1080, height: int = 1920) -> dict:
     """
     Transcribe audio using Groq Whisper large-v3 API.
 
@@ -172,7 +172,7 @@ def transcribe_audio(audio_path: str, custom_vocabulary: list = None, highlight_
                     "start": w.start,
                     "end": w.end
                 })
-        ass_content = generate_karaoke_ass(word_list, highlight_color=highlight_color or "#66FF00", border=border, border_color=border_color or "#000000")
+        ass_content = generate_karaoke_ass(word_list, video_width=width, video_height=height, highlight_color=highlight_color or "#66FF00", border=border, border_color=border_color or "#000000")
 
     return {
         "transcript": transcript,

@@ -44,6 +44,7 @@ class Job(Base):
     thumbnail_text_color = Column(String(7))
     caption_border = Column(String(10))
     caption_border_color = Column(String(7))
+    orientation = Column(String(12))
 
     # Output
     output_video_path = Column(String(500))

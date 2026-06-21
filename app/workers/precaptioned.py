@@ -21,6 +21,12 @@ def get_db_session():
     return Session()
 
 
+def _output_dims(job):
+    if getattr(job, "orientation", None) == "horizontal":
+        return 1920, 1080
+    return 1080, 1920
+
+
 def process_precaptioned_job(job_id: str):
     """
     Process a pre-captioned video (already has captions burned in).
@@ -49,6 +55,7 @@ def process_precaptioned_job(job_id: str):
 
         trim_seconds = float(job.remove_outro_seconds or "3")
         output_path = str(storage.get_export_path(job_id, "video.mp4"))
+        out_w, out_h = _output_dims(job)
 
         ffmpeg.remove_capcut_watermark(
             input_video,
@@ -58,6 +65,8 @@ def process_precaptioned_job(job_id: str):
             job_id=job_id,
             duration=duration,
             append_outro=True,  # Outro appended in same encode
+            target_width=out_w,
+            target_height=out_h,
             progress_base=0,
             progress_ceiling=45,
         )
@@ -133,6 +142,8 @@ def process_precaptioned_job(job_id: str):
             job.suggested_thumbnail_text_fi or "KATSO",
             job.suggested_thumbnail_text_en or "WATCH",
             text_color=job.thumbnail_text_color,
+            target_width=out_w,
+            target_height=out_h,
         )
 
         job.thumbnail_path = thumb_paths["clean"]

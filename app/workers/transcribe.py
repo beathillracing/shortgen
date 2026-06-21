@@ -16,6 +16,12 @@ def get_db_session():
     return Session()
 
 
+def _output_dims(job):
+    if getattr(job, "orientation", None) == "horizontal":
+        return 1920, 1080
+    return 1080, 1920
+
+
 def analyze_and_prepare_video(db, job: Job, input_video: str, cut_video_path: str):
     """Transcribe, analyze, cut, and prepare caption files before thumbnail selection."""
     video_info = ffmpeg.get_video_info(input_video)
@@ -25,11 +31,14 @@ def analyze_and_prepare_video(db, job: Job, input_video: str, cut_video_path: st
     ffmpeg.extract_audio(input_video, audio_path)
 
     update_job_status(db, job, "transcribing", "Transcribing audio...", 30)
+    cap_w, cap_h = _output_dims(job)
     transcription = whisper.transcribe_audio(
         audio_path,
         highlight_color=job.caption_highlight_color,
         border=(job.caption_border != "false"),
         border_color=job.caption_border_color,
+        width=cap_w,
+        height=cap_h,
     )
     job.transcript = transcription["transcript"]
     job.srt_content = whisper.split_srt_into_chunks(transcription["srt"], max_words=4)
@@ -256,12 +265,15 @@ def continue_processing(job_id: str, selected_thumbnail_index: int = 1, thumbnai
         )
 
         export_dir = storage.get_export_path(job_id, "")
+        out_w, out_h = _output_dims(job)
         thumb_paths = thumbnail.create_thumbnail_variants(
             base_thumb_path,
             export_dir,
             text_fi,
             text_en,
             text_color=job.thumbnail_text_color,
+            target_width=out_w,
+            target_height=out_h,
         )
 
         job.thumbnail_path = thumb_paths["clean"]
@@ -280,6 +292,8 @@ def continue_processing(job_id: str, selected_thumbnail_index: int = 1, thumbnai
             job_id=str(job.id),
             thumbnail_path=thumb_paths["fi"],  # Prepend Finnish thumbnail WITH TEXT
             thumbnail_duration=settings.thumbnail_duration_seconds,
+            target_width=out_w,
+            target_height=out_h,
             progress_base=80,
             progress_ceiling=99,
         )

@@ -176,6 +176,8 @@ def create_thumbnail_variants(
     text_fi: str,
     text_en: str,
     text_color: str = None,
+    target_width: int = 1080,
+    target_height: int = 1920,
 ) -> dict:
     """
     Create thumbnail variants with Finnish and English text.
@@ -188,7 +190,7 @@ def create_thumbnail_variants(
 
     # First convert base image to vertical format
     vertical_base = str(output_dir / "thumbnail_base_vertical.jpg")
-    make_vertical_thumbnail(base_image_path, vertical_base)
+    make_vertical_thumbnail(base_image_path, vertical_base, target_width, target_height)
 
     # Finnish thumbnail
     fi_path = str(output_dir / "thumbnail_fi.jpg")
