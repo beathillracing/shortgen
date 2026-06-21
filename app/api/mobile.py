@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.api.jobs import continue_job, select_thumbnail
+from app.api.jobs import continue_job, retry_job, select_thumbnail
 from app.api.social import queue_publish
 from app.api.upload import create_and_queue_job
 from app.config import settings
@@ -557,6 +557,16 @@ def delete_mobile_job(
     db.delete(job)
     db.commit()
     return {"status": "deleted"}
+
+
+@router.post("/jobs/{job_id}/retry")
+def retry_mobile_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    identity: dict = Depends(_mobile_identity),
+):
+    _job_or_404(job_id, db, identity)
+    return retry_job(job_id, db)
 
 
 @router.post("/jobs/{job_id}/continue")

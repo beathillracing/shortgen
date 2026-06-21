@@ -215,6 +215,10 @@ class ShortGenApi(
         requestJson("DELETE", "/api/mobile/jobs/$jobId")
     }
 
+    suspend fun retryJob(jobId: String) = withContext(Dispatchers.IO) {
+        requestJson("POST", "/api/mobile/jobs/$jobId/retry")
+    }
+
     suspend fun updateMetadata(jobId: String, title: String, description: String) =
         withContext(Dispatchers.IO) {
             requestJson(

@@ -131,6 +131,48 @@ def update_job_status(job_id: str, data: dict, db: Session = Depends(get_db)):
 
 
 @router.post("/jobs/{job_id}/continue")
+def retry_job(job_id: str, db: Session = Depends(get_db)):
+    """Re-queue a failed job for processing using its original upload."""
+    import json
+    from pathlib import Path
+    from redis import Redis
+    from rq import Queue
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job.status != "failed":
+        raise HTTPException(400, "Only failed jobs can be retried")
+
+    paths = []
+    if job.upload_paths:
+        try:
+            paths = json.loads(job.upload_paths)
+        except (TypeError, json.JSONDecodeError):
+            paths = []
+    if not paths and job.upload_path:
+        paths = [job.upload_path]
+    if not any(p and Path(p).exists() for p in paths):
+        raise HTTPException(
+            400,
+            "The original upload is no longer available. Please upload the video again.",
+        )
+
+    job.status = "pending"
+    job.current_step = "Queued for retry"
+    job.error_message = None
+    db.commit()
+
+    queue = Queue(connection=Redis.from_url(settings.redis_url))
+    worker = (
+        "app.workers.precaptioned.process_precaptioned_job"
+        if job.precaptioned == "true"
+        else "app.workers.transcribe.process_job"
+    )
+    queue.enqueue(worker, str(job.id), job_timeout="30m")
+    return {"status": "processing"}
+
+
 def continue_job(job_id: str, data: dict, db: Session = Depends(get_db)):
     """Continue processing after thumbnail selection."""
     from redis import Redis

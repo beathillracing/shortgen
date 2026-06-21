@@ -43,6 +43,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -577,10 +578,40 @@ private fun JobContent(
                 onOpenSettings = onOpenSettings,
                 onAction = onAction,
             )
-            "failed" -> Text(
-                job.summary.error ?: "Processing failed",
-                color = MaterialTheme.colorScheme.error,
-            )
+            "failed" -> {
+                var confirmRetry by remember(job.summary.id) { mutableStateOf(false) }
+                Text(
+                    job.summary.error ?: "Processing failed",
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Button(
+                    onClick = { confirmRetry = true },
+                    enabled = !busy,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text(if (busy) "Working..." else "Retry processing") }
+                if (confirmRetry) {
+                    AlertDialog(
+                        onDismissRequest = { confirmRetry = false },
+                        title = { Text("Retry processing?") },
+                        text = {
+                            Text(
+                                "It failed with:\n\n" +
+                                    (job.summary.error ?: "Unknown error") +
+                                    "\n\nTry processing the same upload again?",
+                            )
+                        },
+                        confirmButton = {
+                            Button(onClick = {
+                                confirmRetry = false
+                                onAction { api.retryJob(job.summary.id) }
+                            }) { Text("Retry") }
+                        },
+                        dismissButton = {
+                            OutlinedButton(onClick = { confirmRetry = false }) { Text("Cancel") }
+                        },
+                    )
+                }
+            }
             else -> {
                 LinearProgressIndicator(
                     progress = { job.summary.progress / 100f },
@@ -750,24 +781,28 @@ private fun ReviewAndPublish(
     val tiktokConnection = connections["tiktok"]
     PlatformRow(
         label = "YouTube",
+        help = "Uploads to your YouTube channel as a Short or video.",
         selected = youtube,
         posted = job.posted.youtube,
         connection = youtubeConnection,
     ) { youtube = it }
     PlatformRow(
         label = "Instagram",
+        help = "Posts a Reel to your connected Instagram (Business or Creator account).",
         selected = instagram,
         posted = job.posted.instagram,
         connection = instagramConnection,
     ) { instagram = it }
     PlatformRow(
         label = "Facebook",
+        help = "Posts a Reel to your connected Facebook Page.",
         selected = facebook,
         posted = job.posted.facebook,
         connection = facebookConnection,
     ) { facebook = it }
     PlatformRow(
         label = "TikTok draft",
+        help = "Uploads to your TikTok drafts; open TikTok to finish and post.",
         selected = tiktok,
         posted = job.posted.tiktok,
         connection = tiktokConnection,
@@ -1098,27 +1133,45 @@ private fun AuthVideo(api: ShortGenApi, path: String) {
 @Composable
 private fun PlatformRow(
     label: String,
+    help: String,
     selected: Boolean,
     posted: Boolean,
     connection: PlatformConnection?,
     available: Boolean = connection?.connected == true,
     onChange: (Boolean) -> Unit,
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Checkbox(
-            checked = selected,
-            onCheckedChange = onChange,
-            enabled = !posted && available,
-        )
-        val suffix = when {
-            posted -> "posted"
-            available -> connection?.label ?: "connected"
-            else -> "not connected"
+    var showHelp by remember { mutableStateOf(false) }
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Checkbox(
+                checked = selected,
+                onCheckedChange = onChange,
+                enabled = !posted && available,
+            )
+            val suffix = when {
+                posted -> "posted"
+                available -> connection?.label ?: "connected"
+                else -> "not connected"
+            }
+            Text("$label ($suffix)")
+            IconButton(onClick = { showHelp = !showHelp }) {
+                Icon(
+                    Icons.Outlined.Info,
+                    contentDescription = "About $label",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
-        Text("$label ($suffix)")
+        if (showHelp) {
+            Text(
+                help,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
