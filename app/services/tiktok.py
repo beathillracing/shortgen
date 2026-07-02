@@ -123,6 +123,17 @@ def refresh_mobile_token(connection_data: dict) -> dict:
 
 def _access_token(connection_data: dict | None = None) -> str:
     token = connection_data or _load_token()
+    # Global token: TikTok access tokens last 24h, so refresh when stale.
+    if (
+        connection_data is None
+        and token.get("refresh_token")
+        and int(token.get("expires_at", 0)) <= int(time.time()) + 300
+    ):
+        try:
+            token = refresh_mobile_token(token)
+            _save_json(TOKEN_FILE, token)
+        except Exception:
+            pass
     access_token = token.get("access_token")
     if not access_token:
         raise ValueError("TikTok is not authenticated")
