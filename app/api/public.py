@@ -13,6 +13,19 @@ router = APIRouter()
 templates = Jinja2Templates(directory="/var/www/shortgen/app/templates")
 
 
+WEBCLIENT_DIR = Path("/var/www/shortgen/app/webclient")
+
+
+@router.get("/public/studio", response_class=HTMLResponse)
+def studio_page():
+    """Mobile web client (Beathill Studio).
+
+    Served under /public/ so it bypasses the admin auth_request gate in
+    nginx - testers authenticate with their own bearer token instead.
+    """
+    return FileResponse(WEBCLIENT_DIR / "studio.html", media_type="text/html")
+
+
 @router.get("/public/app", response_class=HTMLResponse)
 def public_app_page(request: Request):
     return templates.TemplateResponse("public_app.html", {"request": request})
@@ -65,6 +78,18 @@ def public_creator_android_app():
         "/var/www/shortgen/assets/public/shortgen-creator-android.apk",
         media_type="application/vnd.android.package-archive",
         filename="ShortGen-Creator.apk",
+    )
+
+
+@router.get("/public/{filename}.aab")
+def public_android_app_bundle(filename: str):
+    bundle_path = Path("/var/www/shortgen/assets/public") / f"{filename}.aab"
+    if not bundle_path.exists() or not bundle_path.is_file():
+        raise HTTPException(404, "App bundle not found")
+    return FileResponse(
+        bundle_path,
+        media_type="application/octet-stream",
+        filename=f"{filename}.aab",
     )
 
 
