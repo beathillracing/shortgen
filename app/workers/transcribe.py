@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
 from app.models import Job
-from app.services import ffmpeg, whisper, claude, storage, thumbnail, youtube
+from app.services import ffmpeg, whisper, claude, storage, thumbnail, youtube, captions
 from app.services.progress import set_progress, clear_progress
 
 
@@ -104,6 +104,10 @@ def analyze_and_prepare_video(db, job: Job, input_video: str, cut_video_path: st
     if transcription.get("ass"):
         ass_path = storage.get_processing_path(str(job.id), "captions.ass")
         ass_path.write_text(transcription["ass"])
+
+    # Keep the word timings so captions stay editable before they are burned in.
+    if transcription.get("words"):
+        captions.save_word_timings(str(job.id), transcription["words"])
 
 
 def process_job(job_id: str):

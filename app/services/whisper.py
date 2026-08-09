@@ -157,8 +157,8 @@ def transcribe_audio(audio_path: str, custom_vocabulary: list = None, highlight_
 
     # Generate karaoke ASS if we have word timestamps
     ass_content = ""
+    word_list = []
     if hasattr(response, 'words') and response.words:
-        word_list = []
         for w in response.words:
             if isinstance(w, dict):
                 word_list.append({
@@ -178,6 +178,7 @@ def transcribe_audio(audio_path: str, custom_vocabulary: list = None, highlight_
         "transcript": transcript,
         "srt": srt_content,
         "ass": ass_content,
+        "words": word_list,
     }
 
 

@@ -76,6 +76,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -601,7 +603,7 @@ fun JobDetailScreen(
             val publishing = publishState == "queued" || publishState == "running"
             // Stop the 3s poll once the job is settled; user actions bump refreshKey
             // to restart it, and active publishing keeps it alive.
-            val settled = status == "failed" ||
+            val settled = status == "failed" || status == "caption_review" ||
                 ((status == "review" || status == "completed") && !publishing)
             if (settled) break
             delay(3000)
@@ -687,6 +689,12 @@ private fun JobContent(
                 continueProcessing = { index, fi, en, color ->
                     onAction { api.continueJob(job.summary.id, index, fi, en, color) }
                 },
+            )
+            "caption_review" -> CaptionReview(
+                job = job,
+                api = api,
+                busy = busy,
+                onAction = onAction,
             )
             "review", "completed" -> ReviewAndPublish(
                 job = job,
@@ -777,6 +785,93 @@ private fun ThumbnailSelection(
     ) { Text(if (busy) "Starting..." else "Continue processing") }
 }
 
+/**
+ * Subtitles are burned into the video during the render, so this is the last
+ * point where fixing a misheard word costs nothing. Edits save when a line
+ * loses focus; untouched lines are never sent.
+ */
+@Composable
+private fun CaptionReview(
+    job: JobDetail,
+    api: ShortGenApi,
+    busy: Boolean,
+    onAction: ((suspend () -> Unit) -> Unit),
+) {
+    var lines by remember(job.summary.id) { mutableStateOf<List<CaptionLine>>(emptyList()) }
+    var loadError by remember(job.summary.id) { mutableStateOf<String?>(null) }
+    var note by remember(job.summary.id) { mutableStateOf("Saved automatically") }
+
+    LaunchedEffect(job.summary.id) {
+        runCatching { api.getCaptions(job.summary.id) }
+            .onSuccess { lines = it }
+            .onFailure { loadError = it.message ?: "Could not load the subtitles" }
+    }
+
+    Text("Subtitles", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+    Text(
+        "Check the text before the video is made. Fix anything that was " +
+            "misheard - you cannot change it afterwards.",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+
+    loadError?.let {
+        Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+    }
+
+    lines.forEach { line ->
+        var text by remember(job.summary.id, line.index) { mutableStateOf(line.text) }
+        var saved by remember(job.summary.id, line.index) { mutableStateOf(line.text) }
+        var wasFocused by remember(job.summary.id, line.index) { mutableStateOf(false) }
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it },
+            label = { Text(formatStamp(line.start)) },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { state ->
+                    if (wasFocused && !state.isFocused && text != saved) {
+                        val pending = text
+                        note = "Saving..."
+                        onAction {
+                            api.updateCaption(job.summary.id, line.index, pending)
+                            saved = pending
+                            note = "Saved"
+                        }
+                    }
+                    wasFocused = state.isFocused
+                },
+        )
+    }
+
+    Text(note, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+    Button(
+        onClick = { onAction { api.approveCaptions(job.summary.id) } },
+        enabled = !busy && lines.isNotEmpty(),
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text(if (busy) "Starting..." else "Looks good - make the video") }
+}
+
+/** Saves when a field loses focus, and only when its value actually changed. */
+private fun Modifier.saveOnLeave(value: String, save: () -> Unit): Modifier = composed {
+    var saved by remember { mutableStateOf(value) }
+    var wasFocused by remember { mutableStateOf(false) }
+    onFocusChanged { state ->
+        if (wasFocused && !state.isFocused && value != saved) {
+            saved = value
+            save()
+        }
+        wasFocused = state.isFocused
+    }
+}
+
+private fun formatStamp(seconds: Double): String {
+    val total = seconds.toInt()
+    return "%d:%02d".format(total / 60, total % 60)
+}
+
 @Composable
 private fun ReviewAndPublish(
     job: JobDetail,
@@ -793,6 +888,7 @@ private fun ReviewAndPublish(
     var titleEn by remember(job.summary.id) { mutableStateOf(job.titleEn) }
     var descriptionFi by remember(job.summary.id) { mutableStateOf(job.descriptionFi) }
     var descriptionEn by remember(job.summary.id) { mutableStateOf(job.descriptionEn) }
+    var metaNote by remember(job.summary.id) { mutableStateOf("Saved automatically") }
     val title = if (language == "fi") titleFi else titleEn
     val description = if (language == "fi") descriptionFi else descriptionEn
     var thumbnail by remember { mutableStateOf(pubPrefs.getString("pub_thumbnail", "fi") ?: "fi") }
@@ -826,20 +922,32 @@ private fun ReviewAndPublish(
         value = title,
         onValueChange = { if (language == "fi") titleFi = it else titleEn = it },
         label = { Text("Title") },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().saveOnLeave(title) {
+            metaNote = "Saving..."
+            onAction {
+                api.updateMetadata(job.summary.id, language, title, description)
+                metaNote = "Saved"
+            }
+        },
     )
     OutlinedTextField(
         value = description,
         onValueChange = { if (language == "fi") descriptionFi = it else descriptionEn = it },
         label = { Text("Description") },
         minLines = 4,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().saveOnLeave(description) {
+            metaNote = "Saving..."
+            onAction {
+                api.updateMetadata(job.summary.id, language, title, description)
+                metaNote = "Saved"
+            }
+        },
     )
-    OutlinedButton(
-        onClick = { onAction { api.updateMetadata(job.summary.id, language, title, description) } },
-        enabled = !busy,
-        modifier = Modifier.fillMaxWidth(),
-    ) { Text("Save metadata") }
+    Text(
+        metaNote,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 
     ExportSection(
         job = job,

@@ -77,6 +77,12 @@ data class PlatformOption(
     val label: String,
 )
 
+data class CaptionLine(
+    val index: Int,
+    val start: Double,
+    val text: String,
+)
+
 data class JobDetail(
     val summary: JobSummary,
     val selectedThumbnailIndex: Int,
@@ -249,6 +255,37 @@ class ShortGenApi(
                     .put("description", description),
             )
         }
+
+    suspend fun getCaptions(jobId: String): List<CaptionLine> = withContext(Dispatchers.IO) {
+        val root = requestJson("GET", "/api/mobile/jobs/$jobId/captions")
+        val lines = root.optJSONArray("lines") ?: return@withContext emptyList()
+        (0 until lines.length()).map { index ->
+            val line = lines.getJSONObject(index)
+            CaptionLine(
+                index = line.getInt("index"),
+                start = line.optDouble("start", 0.0),
+                text = line.optString("text", ""),
+            )
+        }
+    }
+
+    suspend fun updateCaption(jobId: String, index: Int, text: String) =
+        withContext(Dispatchers.IO) {
+            requestJson(
+                "PUT",
+                "/api/mobile/jobs/$jobId/captions",
+                JSONObject().put(
+                    "lines",
+                    JSONArray().put(JSONObject().put("index", index).put("text", text)),
+                ),
+            )
+            Unit
+        }
+
+    suspend fun approveCaptions(jobId: String) = withContext(Dispatchers.IO) {
+        requestJson("POST", "/api/mobile/jobs/$jobId/captions/approve")
+        Unit
+    }
 
     suspend fun continueJob(
         jobId: String,

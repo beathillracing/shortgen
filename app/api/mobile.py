@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.api.jobs import continue_job, retry_job, select_thumbnail
+from app.api.jobs import approve_captions, continue_job, retry_job, select_thumbnail
 from app.api.social import queue_publish
 from app.api.upload import create_and_queue_job
 from app.config import settings
@@ -27,6 +27,7 @@ from app.services.mobile_accounts import (
     verify_subscription,
 )
 from app.services.job_metadata import editable_metadata_payload, set_metadata
+from app.services import captions
 from app.services.mobile_oauth import (
     authorization_url,
     connection_statuses,
@@ -197,6 +198,7 @@ def _job_payload(job: Job, include_detail: bool = False) -> dict:
         payload.update(
             {
                 "context": job.context_description or "",
+                "captions_editable": captions.is_editable(job),
                 **editable_metadata_payload(job),
                 "thumbnail_text_fi": job.suggested_thumbnail_text_fi or "",
                 "thumbnail_text_en": job.suggested_thumbnail_text_en or "",
@@ -659,6 +661,50 @@ def continue_mobile_job(
 ):
     _job_or_404(job_id, db, identity)
     return continue_job(job_id, data, db)
+
+
+@router.get("/jobs/{job_id}/captions")
+def get_mobile_captions(
+    job_id: str,
+    db: Session = Depends(get_db),
+    identity: dict = Depends(_mobile_identity),
+):
+    job = _job_or_404(job_id, db, identity)
+    return {
+        "editable": captions.is_editable(job),
+        "lines": captions.editable_lines(job),
+    }
+
+
+@router.put("/jobs/{job_id}/captions")
+def update_mobile_captions(
+    job_id: str,
+    data: dict,
+    db: Session = Depends(get_db),
+    identity: dict = Depends(_mobile_identity),
+):
+    job = _job_or_404(job_id, db, identity)
+    if job.status != "caption_review":
+        raise HTTPException(400, "Subtitles can only be edited while they are under review")
+    lines = data.get("lines")
+    if not isinstance(lines, list):
+        raise HTTPException(400, "lines must be a list")
+    try:
+        updated = captions.save_lines(job, lines)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    db.commit()
+    return {"editable": True, "lines": updated}
+
+
+@router.post("/jobs/{job_id}/captions/approve")
+def approve_mobile_captions(
+    job_id: str,
+    db: Session = Depends(get_db),
+    identity: dict = Depends(_mobile_identity),
+):
+    _job_or_404(job_id, db, identity)
+    return approve_captions(job_id, db)
 
 
 @router.post("/jobs/{job_id}/thumbnail")

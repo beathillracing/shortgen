@@ -10,6 +10,7 @@ from app.models import Job
 from app.config import settings
 from app.services.storage import get_export_path
 from app.services.job_metadata import metadata_for_language, set_metadata
+from app.services import captions
 
 router = APIRouter()
 
@@ -209,9 +210,7 @@ def continue_job(job_id: str, data: dict, db: Session = Depends(get_db)):
     text_en = data.get("text_en")
     thumbnail_text_color = data.get("thumbnail_text_color")
 
-    # Update job status
-    job.status = "processing"
-    job.current_step = "Continuing processing..."
+    # Remember the thumbnail choice before either continuing or pausing
     job.selected_thumbnail_index = str(selected_index)
     if text_fi:
         job.suggested_thumbnail_text_fi = text_fi
@@ -219,6 +218,17 @@ def continue_job(job_id: str, data: dict, db: Session = Depends(get_db)):
         job.suggested_thumbnail_text_en = text_en
     if thumbnail_text_color:
         job.thumbnail_text_color = thumbnail_text_color
+
+    # Captions get burned into the video during the render, so this is the last
+    # chance to fix a typo without paying for a second encode.
+    if captions.is_editable(job):
+        job.status = "caption_review"
+        job.current_step = "Check the subtitles before rendering"
+        db.commit()
+        return {"status": "caption_review", "message": "Check the subtitles before rendering"}
+
+    job.status = "processing"
+    job.current_step = "Continuing processing..."
     db.commit()
 
     # Queue the continuation
@@ -234,6 +244,38 @@ def continue_job(job_id: str, data: dict, db: Session = Depends(get_db)):
     )
 
     return {"status": "processing", "message": "Continuing with selected thumbnail"}
+
+
+def approve_captions(job_id: str, db: Session = Depends(get_db)):
+    """Accept the captions as they stand and start the render."""
+    from redis import Redis
+    from rq import Queue
+    from app.workers.transcribe import continue_processing
+
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    if job.status != "caption_review":
+        raise HTTPException(400, f"Job is not awaiting subtitle review (status: {job.status})")
+
+    selected_index = int(job.selected_thumbnail_index or 1)
+    job.status = "processing"
+    job.current_step = "Continuing processing..."
+    db.commit()
+
+    redis_conn = Redis.from_url(settings.redis_url)
+    queue = Queue(connection=redis_conn)
+    queue.enqueue(
+        continue_processing,
+        job_id,
+        selected_index,
+        job.suggested_thumbnail_text_fi,
+        job.suggested_thumbnail_text_en,
+        job_timeout=1800
+    )
+
+    return {"status": "processing", "message": "Subtitles approved, rendering"}
 
 
 @router.get("/jobs/{job_id}/export")

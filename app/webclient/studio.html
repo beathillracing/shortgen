@@ -709,12 +709,79 @@ async function refreshJob(jobId, full) {
     return;
   }
 
+  if (d.status === "caption_review") {
+    if (!document.getElementById("subsList")) await renderCaptionReview(d);
+    return;
+  }
+
   if (!full && document.getElementById("publishBtn")) {
     updatePublishStatus(pub);   // avoid clobbering edits mid-typing
     return;
   }
 
   renderJobDetail(d);
+}
+
+/* Subtitles are burned into the video by the render, so this is the last
+   point where fixing a typo costs nothing. One line per subtitle, edit the
+   ones that are wrong, leave the rest alone. */
+async function renderCaptionReview(d) {
+  const jobId = d.id;
+  let lines = [];
+  try {
+    lines = (await api("GET", `/api/mobile/jobs/${jobId}/captions`)).lines || [];
+  } catch (e) {
+    $("#main").innerHTML = `<div class="card"><p class="muted">${esc(e.message)}</p></div>`;
+    return;
+  }
+
+  const stamp = s => {
+    const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+    return `${m}:${String(sec).padStart(2, "0")}`;
+  };
+
+  $("#main").innerHTML = `
+    <div class="card">
+      <h2>Subtitles</h2>
+      <p class="muted">Check the text before the video is made. Fix anything
+        that was misheard — you cannot change it afterwards.</p>
+      <div id="subsList" style="margin-top:12px"></div>
+      <p class="muted" id="subsSaved">Saved automatically</p>
+      <button class="filled" id="subsOk" style="margin-top:12px">Looks good — make the video</button>
+    </div>`;
+
+  const list = $("#subsList");
+  lines.forEach(line => {
+    const row = el(`<label class="field"><span>${stamp(line.start)}</span>
+      <input type="text" value="${esc(line.text)}"></label>`);
+    const input = row.querySelector("input");
+    input.onchange = async () => {
+      const note = $("#subsSaved");
+      note.textContent = "Saving…";
+      try {
+        await api("PUT", `/api/mobile/jobs/${jobId}/captions`, {
+          lines: [{ index: line.index, text: input.value }],
+        });
+        line.text = input.value;
+        note.textContent = "Saved";
+      } catch (e) {
+        note.textContent = "Not saved — " + e.message;
+      }
+    };
+    list.appendChild(row);
+  });
+
+  $("#subsOk").onclick = async () => {
+    $("#subsOk").disabled = true;
+    try {
+      await api("POST", `/api/mobile/jobs/${jobId}/captions/approve`);
+      toast("Making the video");
+      refreshJob(jobId, true);
+    } catch (e) {
+      toast(e.message);
+      $("#subsOk").disabled = false;
+    }
+  };
 }
 
 function renderJobDetail(d) {
@@ -740,7 +807,9 @@ function renderJobDetail(d) {
         <span class="spacer">Text colour</span>
         <input type="color" id="tt_color" value="#FFFFFF">
       </div>
-      <button class="tonal" id="applyThumb">Apply thumbnail</button>
+      <p class="muted" id="thumbSaved">Saved automatically</p>
+      ${d.status === "thumbnail_selection"
+        ? `<button class="filled" id="continueBtn">Continue</button>` : ""}
     </div>
 
     <div class="card">
@@ -750,7 +819,7 @@ function renderJobDetail(d) {
       <label class="field"><span>Description</span>
         <textarea id="desc_fi">${esc(d.description_fi || "")}</textarea></label>
       ${(d.hashtags || []).length ? `<p class="muted">${esc((d.hashtags||[]).join(" "))}</p>` : ""}
-      <button class="tonal" id="saveMeta">Save</button>
+      <p class="muted" id="metaSaved">Saved automatically</p>
     </div>
 
     <div class="card">
@@ -784,38 +853,72 @@ function renderJobDetail(d) {
   cands.forEach(c => {
     const img = el(`<img alt="Option ${c.index}" class="${c.index === sel ? "selected" : ""}">`);
     authBlobUrl(c.url).then(u => img.src = u).catch(() => {});
-    img.onclick = () => {
+    img.onclick = async () => {
       chosen = c.index;
       Array.from(strip.children).forEach(n => n.classList.remove("selected"));
       img.classList.add("selected");
+      const note = $("#thumbSaved");
+      note.textContent = "Saving…";
+      try { await applyThumbnail(); note.textContent = "Saved"; }
+      catch (e) { note.textContent = "Not saved — " + e.message; }
     };
     strip.appendChild(img);
   });
 
-  $("#applyThumb").onclick = async () => {
-    try {
-      await api("POST", `/api/mobile/jobs/${jobId}/thumbnail`, {
-        index: chosen,
-        text_fi: $("#tt_fi").value || null,
-        text_en: $("#tt_en").value || null,
-        thumbnail_text_color: $("#tt_color").value || null,
-      });
-      blobCache.clear();
-      toast("Thumbnail updated");
-      refreshJob(jobId, true);
-    } catch (e) { toast(e.message); }
+  // Edits save when you leave a field. The change event only fires when the
+  // value actually changed, so untouched fields cost nothing.
+  const applyThumbnail = async () => {
+    await api("POST", `/api/mobile/jobs/${jobId}/thumbnail`, {
+      index: chosen,
+      text_fi: $("#tt_fi").value || null,
+      text_en: $("#tt_en").value || null,
+      thumbnail_text_color: $("#tt_color").value || null,
+    });
+    blobCache.clear();
   };
 
-  $("#saveMeta").onclick = async () => {
-    try {
-      await api("PATCH", `/api/mobile/jobs/${jobId}`, {
-        language: "fi",
-        title: $("#title_fi").value,
-        description: $("#desc_fi").value,
-      });
-      toast("Saved");
-    } catch (e) { toast(e.message); }
-  };
+  const saveMetadata = () => api("PATCH", `/api/mobile/jobs/${jobId}`, {
+    language: "fi",
+    title: $("#title_fi").value,
+    description: $("#desc_fi").value,
+  });
+
+  function autosave(ids, noteId, save) {
+    const note = $("#" + noteId);
+    ids.forEach(id => {
+      $("#" + id).onchange = async () => {
+        note.textContent = "Saving…";
+        try {
+          await save();
+          note.textContent = "Saved";
+        } catch (e) {
+          note.textContent = "Not saved — " + e.message;
+        }
+      };
+    });
+  }
+
+  autosave(["tt_fi", "tt_en", "tt_color"], "thumbSaved", applyThumbnail);
+  autosave(["title_fi", "desc_fi"], "metaSaved", saveMetadata);
+
+  const continueBtn = document.getElementById("continueBtn");
+  if (continueBtn) {
+    continueBtn.onclick = async () => {
+      continueBtn.disabled = true;
+      try {
+        await api("POST", `/api/mobile/jobs/${jobId}/continue`, {
+          thumbnail_index: chosen,
+          text_fi: $("#tt_fi").value || null,
+          text_en: $("#tt_en").value || null,
+          thumbnail_text_color: $("#tt_color").value || null,
+        });
+        refreshJob(jobId, true);
+      } catch (e) {
+        toast(e.message);
+        continueBtn.disabled = false;
+      }
+    };
+  }
 
   $("#del").onclick = () => deleteJob(jobId);
 
