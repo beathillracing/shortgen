@@ -1,8 +1,8 @@
 {
-  "version_code": 10,
-  "version_name": "0.10.0-creator",
+  "version_code": 28,
+  "version_name": "0.11.8-creator",
   "download_url": "https://shortgen.beathillracing.fi/public/shortgen-creator-android.apk",
-  "sha256": "4640d3e5d4eb86550db2552dc3c479739d13661c2aaee3937e48b09af48baa6b",
+  "sha256": "a135f9351fb0dd58e83e91999e9bf7cd4a2c55244abefeb1ecae9d3673b37bde",
   "releases": [
     {
       "version_code": 4,
@@ -28,6 +28,16 @@
       "version_code": 10,
       "version_name": "0.10.0-creator",
       "notes": "Native background uploads and completion notifications, account isolation and deletion, encrypted sessions, improved progress, themes, downloads, and more reliable publishing workflows."
+    },
+    {
+      "version_code": 27,
+      "version_name": "0.11.7-creator",
+      "notes": "Fix edited titles/descriptions and thumbnail text being saved before publishing; keep Finnish and English edits separate."
+    },
+    {
+      "version_code": 28,
+      "version_name": "0.11.8-creator",
+      "notes": "Fix edited titles/descriptions and thumbnail text being saved before publishing; keep Finnish and English edits separate."
     }
   ]
 }

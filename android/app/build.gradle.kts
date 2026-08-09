@@ -4,7 +4,10 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
-    id("com.google.gms.google-services")
+}
+
+if (gradle.startParameter.taskNames.any { it.contains("Play", ignoreCase = true) }) {
+    apply(plugin = "com.google.gms.google-services")
 }
 
 val localProperties = Properties().apply {
@@ -21,8 +24,8 @@ android {
         applicationId = "fi.beathillracing.shortgen"
         minSdk = 26
         targetSdk = 35
-        versionCode = 27
-        versionName = "0.11.7"
+        versionCode = 28
+        versionName = "0.11.8"
     }
 
     productFlavors {

@@ -238,12 +238,15 @@ class ShortGenApi(
         Unit
     }
 
-    suspend fun updateMetadata(jobId: String, title: String, description: String) =
+    suspend fun updateMetadata(jobId: String, language: String, title: String, description: String) =
         withContext(Dispatchers.IO) {
             requestJson(
                 "PATCH",
                 "/api/mobile/jobs/$jobId",
-                JSONObject().put("title", title).put("description", description),
+                JSONObject()
+                    .put("language", language)
+                    .put("title", title)
+                    .put("description", description),
             )
         }
 

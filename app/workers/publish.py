@@ -3,6 +3,7 @@ from pathlib import Path
 from app.database import SessionLocal
 from app.models import Job
 from app.services import instagram, meta, tiktok, youtube
+from app.services.job_metadata import metadata_for_language
 from app.services.mobile_accounts import entitlement, refresh_subscription_if_due
 from app.services.mobile_oauth import fresh_connection_data
 from app.services.public_media import media_url
@@ -15,18 +16,8 @@ def _set_state(db, job: Job, **updates):
     db.commit()
 
 
-def _metadata(job: Job, language: str) -> tuple[str, str]:
-    if language == "en":
-        title = job.final_title or job.suggested_title_en or job.suggested_title_fi or "Video"
-        description = job.final_description or job.suggested_description_en or job.suggested_description_fi or ""
-    else:
-        title = job.final_title or job.suggested_title_fi or job.suggested_title_en or "Video"
-        description = job.final_description or job.suggested_description_fi or job.suggested_description_en or ""
-    return title, description
-
-
 def _caption(job: Job, language: str, max_length: int) -> str:
-    title, description = _metadata(job, language)
+    title, description = metadata_for_language(job, language)
     hashtags = " ".join(f"#{tag.lstrip('#')}" for tag in (job.suggested_hashtags or []))
     return "\n\n".join(part for part in [title, description, hashtags] if part.strip())[:max_length]
 
@@ -73,7 +64,7 @@ def _publish_youtube(db, job: Job, options: dict) -> dict:
     _prepare_video(job, thumbnail_path, prepend_thumbnail=(content_type == "short"))
     db.commit()
 
-    title, description = _metadata(job, options["language"])
+    title, description = metadata_for_language(job, options["language"])
     result = youtube.upload_video(
         video_path=job.output_video_path,
         title=title,

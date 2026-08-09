@@ -10,13 +10,22 @@ from app.config import settings
 router = APIRouter()
 
 
+def _web_return_key(provider: str) -> str:
+    """Query key the web client watches for after an OAuth round trip."""
+    return {"meta": "facebook"}.get(provider.lower(), provider.lower())
+
+
 def _mobile_oauth_complete(provider: str) -> HTMLResponse:
     return HTMLResponse(
         "<!doctype html><meta name='viewport' content='width=device-width'>"
         "<title>Account connected</title>"
         "<main style='font:16px system-ui;text-align:center;padding:48px 20px'>"
         f"<h1>{provider} connected</h1>"
-        "<p>You can close this page and return to Beathill Studio.</p></main>"
+        "<p>You can close this page and return to Beathill Studio.</p>"
+        f"<p><a href='https://studio.beathillracing.fi/?{_web_return_key(provider)}=connected' "
+        "style='display:inline-block;margin-top:8px;padding:12px 22px;border-radius:100px;"
+        "background:#167A45;color:#fff;text-decoration:none;font-weight:600'>"
+        "Back to Beathill Studio</a></p></main>"
     )
 
 

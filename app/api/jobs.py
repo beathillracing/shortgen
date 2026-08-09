@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models import Job
 from app.config import settings
 from app.services.storage import get_export_path
+from app.services.job_metadata import metadata_for_language, set_metadata
 
 router = APIRouter()
 
@@ -90,9 +91,7 @@ def list_jobs(db: Session = Depends(get_db), limit: int = 20):
 @router.post("/jobs/{job_id}/update")
 def update_job(
     job_id: str,
-    title: str = None,
-    description: str = None,
-    notes: str = None,
+    data: dict,
     db: Session = Depends(get_db)
 ):
     """Update job with user edits."""
@@ -100,10 +99,28 @@ def update_job(
     if not job:
         raise HTTPException(404, "Job not found")
 
-    if title is not None:
-        job.final_title = title
-    if description is not None:
-        job.final_description = description
+    if "title" in data or "description" in data:
+        set_metadata(
+            job,
+            str(data.get("language") or "fi").lower(),
+            data["title"] if "title" in data else None,
+            data["description"] if "description" in data else None,
+        )
+    if "title_fi" in data or "description_fi" in data:
+        set_metadata(
+            job,
+            "fi",
+            data["title_fi"] if "title_fi" in data else None,
+            data["description_fi"] if "description_fi" in data else None,
+        )
+    if "title_en" in data or "description_en" in data:
+        set_metadata(
+            job,
+            "en",
+            data["title_en"] if "title_en" in data else None,
+            data["description_en"] if "description_en" in data else None,
+        )
+    notes = data.get("notes")
     if notes is not None:
         job.notes = notes
 
@@ -255,10 +272,10 @@ def export_job(job_id: str, db: Session = Depends(get_db)):
             # Add metadata JSON
             import json
             metadata = {
-                "title_fi": job.final_title or job.suggested_title_fi,
-                "title_en": job.suggested_title_en,
-                "description_fi": job.final_description or job.suggested_description_fi,
-                "description_en": job.suggested_description_en,
+                "title_fi": job.final_title_fi or job.final_title or job.suggested_title_fi,
+                "title_en": job.final_title_en or job.final_title or job.suggested_title_en,
+                "description_fi": job.final_description_fi or job.final_description or job.suggested_description_fi,
+                "description_en": job.final_description_en or job.final_description or job.suggested_description_en,
                 "hashtags": job.suggested_hashtags or [],
                 "hook_fi": job.suggested_hook_fi,
                 "hook_en": job.suggested_hook_en,
@@ -468,13 +485,7 @@ def upload_to_youtube(job_id: str, data: dict, db: Session = Depends(get_db)):
     if content_type not in ["short", "video"]:
         raise HTTPException(400, "content_type must be short or video")
 
-    # Select title/description based on language
-    if lang == "en":
-        title = job.suggested_title_en or job.suggested_title_fi or "Video"
-        description = job.suggested_description_en or job.suggested_description_fi or ""
-    else:
-        title = job.suggested_title_fi or job.suggested_title_en or "Video"
-        description = job.suggested_description_fi or job.suggested_description_en or ""
+    title, description = metadata_for_language(job, lang)
 
     # Select thumbnail
     if thumb_variant == "en" and job.thumbnail_path_en:

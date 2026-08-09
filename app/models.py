@@ -80,6 +80,10 @@ class Job(Base):
     # User edits
     final_title = Column(String(255))
     final_description = Column(Text)
+    final_title_fi = Column(String(255))
+    final_title_en = Column(String(255))
+    final_description_fi = Column(Text)
+    final_description_en = Column(Text)
     notes = Column(Text)
 
     # Error tracking
@@ -131,6 +135,10 @@ class Job(Base):
             "publish_status": self.publish_status,
             "final_title": self.final_title,
             "final_description": self.final_description,
+            "final_title_fi": self.final_title_fi,
+            "final_title_en": self.final_title_en,
+            "final_description_fi": self.final_description_fi,
+            "final_description_en": self.final_description_en,
             "notes": self.notes,
             "error_message": self.error_message,
             "current_step": self.current_step,

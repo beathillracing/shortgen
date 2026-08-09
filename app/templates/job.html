@@ -142,10 +142,10 @@ async function applyThumbnail() {
     <h3 class="mb-2">Suomeksi (Finnish)</h3>
 
     <label>Otsikko / Title</label>
-    <input type="text" id="title_fi" value="{{ job.suggested_title_fi or '' }}">
+    <input type="text" id="title_fi" value="{{ job.final_title_fi or job.final_title or job.suggested_title_fi or '' }}">
 
     <label>Kuvaus / Description</label>
-    <textarea id="description_fi" rows="3">{{ job.suggested_description_fi or '' }}</textarea>
+    <textarea id="description_fi" rows="3">{{ job.final_description_fi or job.final_description or job.suggested_description_fi or '' }}</textarea>
 
     <label>Koukku / Hook</label>
     <input type="text" id="hook_fi" value="{{ job.suggested_hook_fi or '' }}" readonly>
@@ -156,10 +156,10 @@ async function applyThumbnail() {
     <h3 class="mb-2">English</h3>
 
     <label>Title</label>
-    <input type="text" id="title_en" value="{{ job.suggested_title_en or '' }}">
+    <input type="text" id="title_en" value="{{ job.final_title_en or job.final_title or job.suggested_title_en or '' }}">
 
     <label>Description</label>
-    <textarea id="description_en" rows="3">{{ job.suggested_description_en or '' }}</textarea>
+    <textarea id="description_en" rows="3">{{ job.final_description_en or job.final_description or job.suggested_description_en or '' }}</textarea>
 
     <label>Hook</label>
     <input type="text" id="hook_en" value="{{ job.suggested_hook_en or '' }}" readonly>
@@ -646,6 +646,40 @@ async function publishSelected() {
     btn.disabled = true;
     btn.textContent = 'Queueing...';
     try {
+        if (document.getElementById('thumb_text_fi')) {
+            btn.textContent = 'Saving thumbnail...';
+            const thumbResp = await fetch('/api/jobs/{{ job.id }}/thumbnail/select', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    index: selectedThumbIndex,
+                    text_fi: document.getElementById('thumb_text_fi').value.trim() || null,
+                    text_en: document.getElementById('thumb_text_en').value.trim() || null
+                })
+            });
+            if (!thumbResp.ok) {
+                const thumbData = await thumbResp.json();
+                throw new Error(thumbData.detail || thumbData.error || 'Could not save thumbnail');
+            }
+        }
+
+        btn.textContent = 'Saving text...';
+        const saveResp = await fetch('/api/jobs/{{ job.id }}/update', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                title_fi: document.getElementById('title_fi').value,
+                description_fi: document.getElementById('description_fi').value,
+                title_en: document.getElementById('title_en').value,
+                description_en: document.getElementById('description_en').value
+            })
+        });
+        if (!saveResp.ok) {
+            const saveData = await saveResp.json();
+            throw new Error(saveData.detail || saveData.error || 'Could not save edits');
+        }
+
+        btn.textContent = 'Queueing...';
         const resp = await fetch('/api/jobs/{{ job.id }}/publish', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},

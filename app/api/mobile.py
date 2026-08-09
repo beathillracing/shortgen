@@ -26,6 +26,7 @@ from app.services.mobile_accounts import (
     refresh_subscription_if_due,
     verify_subscription,
 )
+from app.services.job_metadata import editable_metadata_payload, set_metadata
 from app.services.mobile_oauth import (
     authorization_url,
     connection_statuses,
@@ -196,14 +197,9 @@ def _job_payload(job: Job, include_detail: bool = False) -> dict:
         payload.update(
             {
                 "context": job.context_description or "",
-                "title_fi": job.final_title or job.suggested_title_fi or "",
-                "title_en": job.final_title or job.suggested_title_en or "",
-                "description_fi": job.final_description or job.suggested_description_fi or "",
-                "description_en": job.final_description or job.suggested_description_en or "",
+                **editable_metadata_payload(job),
                 "thumbnail_text_fi": job.suggested_thumbnail_text_fi or "",
                 "thumbnail_text_en": job.suggested_thumbnail_text_en or "",
-                "final_title": job.final_title or "",
-                "final_description": job.final_description or "",
                 "hashtags": job.suggested_hashtags or [],
                 "thumbnail_candidates": [
                     {
@@ -298,11 +294,44 @@ def _require_mobile_publishing(db: Session, identity: dict):
     return current
 
 
+def _admin_connection_statuses() -> dict:
+    """Server-level publishing state for the admin token.
+
+    Admin jobs carry no mobile_owner, so app/workers/publish.py resolves
+    credentials from the server-level tokens (youtube_token.json,
+    tiktok_token.json, meta_token.json) instead of per-account OAuth records.
+    Report that state here so the app can offer the platforms without the
+    admin linking anything. Play-account users are unaffected.
+    """
+    from app.services import meta, tiktok
+    from app.services import youtube as yt_service
+
+    youtube_ok = yt_service.is_authenticated()
+    tiktok_ok = tiktok.is_configured() and tiktok.TOKEN_FILE.exists()
+    meta_ok = meta.is_configured() and meta.TOKEN_FILE.exists()
+
+    def entry(connected: bool) -> dict:
+        return {
+            "connected": bool(connected),
+            "label": "Administrator (server account)" if connected else None,
+            "metadata": {"managed": "server", "needs_reconnect": not connected},
+        }
+
+    return {
+        "youtube": entry(youtube_ok),
+        "instagram": entry(meta_ok),
+        "facebook": entry(meta_ok),
+        "tiktok": entry(tiktok_ok),
+    }
+
+
 @router.get("/connections")
 def mobile_connections(
     identity: dict = Depends(_mobile_identity),
     db: Session = Depends(get_db),
 ):
+    if identity.get("role") == "admin":
+        return {"connections": _admin_connection_statuses()}
     _require_mobile_publishing(db, identity)
     return {"connections": connection_statuses(db, identity["owner"])}
 
@@ -567,10 +596,15 @@ def update_mobile_job(
     identity: dict = Depends(_mobile_identity),
 ):
     job = _job_or_404(job_id, db, identity)
-    if "title" in data:
-        job.final_title = str(data["title"]).strip()[:255] or None
-    if "description" in data:
-        job.final_description = str(data["description"]).strip() or None
+    language = str(data.get("language") or "fi").lower()
+    if language not in {"fi", "en"}:
+        raise HTTPException(400, "language must be fi or en")
+    set_metadata(
+        job,
+        language,
+        data["title"] if "title" in data else None,
+        data["description"] if "description" in data else None,
+    )
     db.commit()
     return _job_payload(job, include_detail=True)
 

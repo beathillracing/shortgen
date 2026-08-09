@@ -16,9 +16,15 @@ from app.database import get_db
 from app.models import Job
 from app.config import settings
 from app.services import meta, mobile_oauth, tiktok
+from app.services.job_metadata import metadata_for_language
 from app.services.public_media import media_url
 
 router = APIRouter()
+
+
+def _web_return_key(provider: str) -> str:
+    """Query key the web client watches for after an OAuth round trip."""
+    return {"meta": "facebook"}.get(provider.lower(), provider.lower())
 
 
 def _mobile_oauth_complete(provider: str) -> HTMLResponse:
@@ -27,7 +33,11 @@ def _mobile_oauth_complete(provider: str) -> HTMLResponse:
         "<title>Account connected</title>"
         "<main style='font:16px system-ui;text-align:center;padding:48px 20px'>"
         f"<h1>{provider} connected</h1>"
-        "<p>You can close this page and return to Beathill Studio.</p></main>"
+        "<p>You can close this page and return to Beathill Studio.</p>"
+        f"<p><a href='https://studio.beathillracing.fi/?{_web_return_key(provider)}=connected' "
+        "style='display:inline-block;margin-top:8px;padding:12px 22px;border-radius:100px;"
+        "background:#167A45;color:#fff;text-decoration:none;font-weight:600'>"
+        "Back to Beathill Studio</a></p></main>"
     )
 
 
@@ -85,18 +95,8 @@ def _job_or_404(job_id: str, db: Session) -> Job:
     return job
 
 
-def _metadata(job: Job, language: str) -> tuple[str, str]:
-    if language == "en":
-        title = job.final_title or job.suggested_title_en or job.suggested_title_fi or "Video"
-        description = job.final_description or job.suggested_description_en or job.suggested_description_fi or ""
-    else:
-        title = job.final_title or job.suggested_title_fi or job.suggested_title_en or "Video"
-        description = job.final_description or job.suggested_description_fi or job.suggested_description_en or ""
-    return title, description
-
-
 def _caption(job: Job, language: str, max_length: int) -> str:
-    title, description = _metadata(job, language)
+    title, description = metadata_for_language(job, language)
     hashtags = " ".join(f"#{tag.lstrip('#')}" for tag in (job.suggested_hashtags or []))
     caption = "\n\n".join(part for part in [title, description, hashtags] if part.strip())
     return caption[:max_length]

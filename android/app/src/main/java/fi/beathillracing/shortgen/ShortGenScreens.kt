@@ -836,7 +836,7 @@ private fun ReviewAndPublish(
         modifier = Modifier.fillMaxWidth(),
     )
     OutlinedButton(
-        onClick = { onAction { api.updateMetadata(job.summary.id, title, description) } },
+        onClick = { onAction { api.updateMetadata(job.summary.id, language, title, description) } },
         enabled = !busy,
         modifier = Modifier.fillMaxWidth(),
     ) { Text("Save metadata") }
@@ -975,7 +975,16 @@ private fun ReviewAndPublish(
                         }.toMap(),
                     )
                 }
-                api.updateMetadata(job.summary.id, title, description)
+                api.updateMetadata(job.summary.id, language, title, description)
+                if (job.candidates.isNotEmpty()) {
+                    api.applyThumbnail(
+                        job.summary.id,
+                        selectedCandidate,
+                        thumbnailTextFi,
+                        thumbnailTextEn,
+                        thumbnailTextColor,
+                    )
+                }
                 api.publish(job.summary.id, selectedPlatforms, language, thumbnail, contentType)
             }
         },

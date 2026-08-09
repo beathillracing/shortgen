@@ -64,6 +64,10 @@ def ensure_job_columns():
         "caption_border_color": "VARCHAR(7)",
         "orientation": "VARCHAR(12)",
         "caption_position": "VARCHAR(8)",
+        "final_title_fi": "VARCHAR(255)",
+        "final_title_en": "VARCHAR(255)",
+        "final_description_fi": "TEXT",
+        "final_description_en": "TEXT",
     }
     with engine.begin() as conn:
         for name, ddl in columns.items():
