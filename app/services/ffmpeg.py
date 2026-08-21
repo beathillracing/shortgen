@@ -60,6 +60,34 @@ def append_outro(input_path: str, output_path: str) -> str:
     return output_path
 
 
+def _fit_fill_filter(
+    src: str,
+    out: str,
+    width: int,
+    height: int,
+    tag: str,
+    post: str = "",
+    src_width: int | None = None,
+    src_height: int | None = None,
+) -> str:
+    """Fit a clip inside width x height. When the source aspect already
+    matches the target, plain scale+pad (a no-op pad) is used; otherwise the
+    bars are filled with a blurred, cropped copy of the clip."""
+    if src_width and src_height:
+        if abs(src_width / src_height - width / height) < 0.02:
+            return (
+                f"{src}scale={width}:{height}:force_original_aspect_ratio=decrease,"
+                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1{post}{out}"
+            )
+    return (
+        f"{src}split=2[bf_bg{tag}][bf_fg{tag}];"
+        f"[bf_bg{tag}]scale={width}:{height}:force_original_aspect_ratio=increase,"
+        f"crop={width}:{height},boxblur=20:2[bf_bgb{tag}];"
+        f"[bf_fg{tag}]scale={width}:{height}:force_original_aspect_ratio=decrease[bf_fgs{tag}];"
+        f"[bf_bgb{tag}][bf_fgs{tag}]overlay=(W-w)/2:(H-h)/2,setsar=1{post}{out}"
+    )
+
+
 def get_video_info(video_path: str) -> dict:
     """Get video metadata using ffprobe."""
     cmd = [
@@ -200,10 +228,18 @@ def render_video_with_captions(
     # Build filter chain
     filter_parts = []
 
-    # Scale and pad video to 9:16
+    # Fit video to target frame (blurred fill when the aspect differs)
+    src_info = get_video_info(input_path)
     filter_parts.append(
-        f"[0:v]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
-        f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black[scaled]"
+        _fit_fill_filter(
+            "[0:v]",
+            "[scaled]",
+            target_width,
+            target_height,
+            "m",
+            src_width=src_info["width"],
+            src_height=src_info["height"],
+        )
     )
 
     current_output = "[scaled]"
@@ -337,10 +373,17 @@ def render_video_with_captions_and_outro(
     # Build filter chain
     filter_parts = []
 
-    # Scale and pad main video to 9:16
+    # Fit main video to target frame (blurred fill when the aspect differs)
     filter_parts.append(
-        f"[{main_video_idx}:v]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
-        f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black[scaled]"
+        _fit_fill_filter(
+            f"[{main_video_idx}:v]",
+            "[scaled]",
+            target_width,
+            target_height,
+            "m",
+            src_width=video_info["width"],
+            src_height=video_info["height"],
+        )
     )
 
     current_video = "[scaled]"
@@ -492,9 +535,16 @@ def stitch_videos(
     streams = []
     for index, info in enumerate(infos):
         filter_parts.append(
-            f"[{index}:v]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
-            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black,"
-            f"fps=30,setpts=PTS-STARTPTS[v{index}]"
+            _fit_fill_filter(
+                f"[{index}:v]",
+                f"[v{index}]",
+                target_width,
+                target_height,
+                f"s{index}",
+                post=",fps=30,setpts=PTS-STARTPTS",
+                src_width=info["width"],
+                src_height=info["height"],
+            )
         )
         if info["has_audio"]:
             filter_parts.append(
@@ -596,11 +646,17 @@ def remove_capcut_watermark(
     # Build filter chain
     filter_parts = []
 
-    # Scale and pad main video to 9:16, trim it
+    # Fit main video to target frame (blurred fill when the aspect differs)
     filter_parts.append(
-        f"[0:v]trim=0:{trim_to},setpts=PTS-STARTPTS,"
-        f"scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
-        f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black[scaled]"
+        _fit_fill_filter(
+            f"[0:v]trim=0:{trim_to},setpts=PTS-STARTPTS,",
+            "[scaled]",
+            target_width,
+            target_height,
+            "p",
+            src_width=video_info["width"],
+            src_height=video_info["height"],
+        )
     )
     filter_parts.append(
         f"[0:a]atrim=0:{trim_to},asetpts=PTS-STARTPTS[main_audio]"
