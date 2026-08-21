@@ -470,7 +470,12 @@ def render_video_with_captions_and_outro(
     return output_path
 
 
-def stitch_videos(input_paths: list, output_path: str) -> str:
+def stitch_videos(
+    input_paths: list,
+    output_path: str,
+    target_width: int = 1080,
+    target_height: int = 1920,
+) -> str:
     """Stitch clips after normalizing timestamps, frame rate, size, and audio."""
     if len(input_paths) == 1:
         import shutil
@@ -487,8 +492,8 @@ def stitch_videos(input_paths: list, output_path: str) -> str:
     streams = []
     for index, info in enumerate(infos):
         filter_parts.append(
-            f"[{index}:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
-            f"pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black,"
+            f"[{index}:v]scale={target_width}:{target_height}:force_original_aspect_ratio=decrease,"
+            f"pad={target_width}:{target_height}:(ow-iw)/2:(oh-ih)/2:black,"
             f"fps=30,setpts=PTS-STARTPTS[v{index}]"
         )
         if info["has_audio"]:

@@ -133,7 +133,8 @@ def process_job(job_id: str):
             update_job_status(db, job, "processing", "Combining video clips...", 5)
             paths = json.loads(job.upload_paths)
             stitched_path = str(storage.get_processing_path(job_id, "stitched.mp4"))
-            ffmpeg.stitch_videos(paths, stitched_path)
+            stitch_w, stitch_h = _output_dims(job)
+            ffmpeg.stitch_videos(paths, stitched_path, stitch_w, stitch_h)
             input_video = stitched_path
         else:
             input_video = job.upload_path
