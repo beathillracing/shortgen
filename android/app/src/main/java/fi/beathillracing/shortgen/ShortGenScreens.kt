@@ -445,7 +445,7 @@ fun JobsScreen(
                 .onFailure { error = it.message }
             refreshing = false
             val active = result.getOrNull()?.any {
-                it.status !in setOf("completed", "failed", "review")
+                it.status !in setOf("completed", "failed", "review", "caption_review")
             } ?: false
             delay(if (active) 5_000 else 30_000)
         }
@@ -547,7 +547,7 @@ private fun JobRow(job: JobSummary, onClick: () -> Unit, onDelete: () -> Unit) {
                 Text(job.status.replace("_", " "), color = statusColor(job.status))
                 Text(formatDate(job.createdAt), style = MaterialTheme.typography.bodySmall)
             }
-            if (job.status !in setOf("review", "completed", "failed")) {
+            if (job.status !in setOf("review", "completed", "failed", "caption_review")) {
                 LinearProgressIndicator(
                     progress = { job.progress / 100f },
                     modifier = Modifier.fillMaxWidth(),
